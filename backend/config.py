@@ -11,6 +11,7 @@ OPENALEX_EMAIL = os.getenv("OPENALEX_EMAIL", "")
 KIPRIS_API_KEY = os.getenv("KIPRIS_API_KEY", "")
 EPO_OPS_KEY    = os.getenv("EPO_OPS_KEY", "")
 EPO_OPS_SECRET = os.getenv("EPO_OPS_SECRET", "")
+LENS_API_KEY   = os.getenv("LENS_API_KEY", "")
 
 KEYWORDS = [
     "physical AI",
