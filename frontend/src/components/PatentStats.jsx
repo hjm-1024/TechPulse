@@ -1,6 +1,6 @@
 const DOMAIN_COLOR = { physical_ai_robotics: "#10b981", telecom_6g: "#f59e0b" };
 const DOMAIN_LABEL = { physical_ai_robotics: "Physical AI & Robotics", telecom_6g: "Telecom & 6G" };
-const SOURCE_COLOR = { patentsview: "#ef4444", kipris: "#3b82f6" };
+const SOURCE_COLOR = { uspto: "#ef4444", kipris: "#3b82f6" };
 const FLAG = { US: "🇺🇸", KR: "🇰🇷" };
 
 export default function PatentStats({ data }) {
@@ -30,7 +30,7 @@ export default function PatentStats({ data }) {
           {Object.entries(data.by_source).map(([src, count]) => (
             <div key={src} style={styles.chip}>
               <span style={{ ...styles.dot, background: SOURCE_COLOR[src] ?? "#94a3b8" }} />
-              <span style={styles.srcName}>{src === "patentsview" ? "PatentsView (US)" : "KIPRIS (KR)"}</span>
+              <span style={styles.srcName}>{src === "uspto" ? "USPTO (US)" : "KIPRIS (KR)"}</span>
               <span style={styles.srcCount}>{count.toLocaleString()}</span>
             </div>
           ))}
