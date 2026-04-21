@@ -18,7 +18,7 @@ from backend.collectors.arxiv_collector import fetch_papers as arxiv_fetch
 from backend.collectors.semantic_scholar_collector import fetch_papers as ss_fetch
 from backend.collectors.openalex_collector import fetch_papers as openalex_fetch
 from backend.collectors.lens_collector import fetch_patents as lens_fetch
-from backend.collectors.epo_collector import fetch_patents as epo_fetch
+from backend.collectors.epo_collector import fetch_patents as epo_fetch, enrich_epo_patents
 from backend.collectors.kipris_collector import fetch_patents as kipris_fetch
 from backend.utils.logger import get_logger
 
@@ -61,9 +61,14 @@ def _run_patents(source: str, days_back: int) -> None:
             logger.error("%s failed: %s", name, exc, exc_info=True)
 
 
-def run(data_type: str, source: str, days_back: int) -> None:
+def run(data_type: str, source: str, days_back: int, enrich: bool = False) -> None:
     init_db(DB_PATH)
     init_patents_db(DB_PATH)
+
+    if enrich:
+        logger.info("=== EPO party enrichment ===")
+        enrich_epo_patents(DB_PATH)
+        return
 
     if data_type in ("papers", "all"):
         paper_source = source if source in _PAPER_SOURCES else "all"
@@ -96,5 +101,10 @@ if __name__ == "__main__":
         default=90,
         help="Days of history to fetch (default: 90)",
     )
+    parser.add_argument(
+        "--enrich",
+        action="store_true",
+        help="Fill in missing EPO assignee/inventor data via individual patent lookups",
+    )
     args = parser.parse_args()
-    run(data_type=args.type, source=args.source, days_back=args.days)
+    run(data_type=args.type, source=args.source, days_back=args.days, enrich=args.enrich)

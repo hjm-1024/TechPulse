@@ -38,6 +38,18 @@ def init_patents_db(db_path: str) -> None:
     logger.info("Patents table initialised at %s", db_path)
 
 
+def update_patent_parties(db_path: str, patent_number: str, source: str,
+                          assignee: str, inventors: str) -> bool:
+    """Update assignee/inventors for one patent. Returns True if a row was changed."""
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE patents SET assignee=?, inventors=? WHERE patent_number=? AND source=?",
+            (assignee, inventors, patent_number, source),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
 def upsert_patents(db_path: str, patents: list[dict]) -> tuple[int, int]:
     """Insert patents, skip duplicates. Returns (inserted, skipped)."""
     inserted = skipped = 0

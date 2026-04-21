@@ -22,8 +22,9 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_AUTH_URL   = "https://ops.epo.org/3.2/auth/accesstoken"
-_SEARCH_URL = "https://ops.epo.org/3.2/rest-services/published-data/search/biblio"
+_AUTH_URL    = "https://ops.epo.org/3.2/auth/accesstoken"
+_SEARCH_URL  = "https://ops.epo.org/3.2/rest-services/published-data/search/biblio"
+_SINGLE_URL  = "https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{number}/biblio"
 _BATCH_SIZE = 25          # EPO OPS free tier: max 25 per request
 _RATE_LIMIT_SECS = 1.3    # ~23 req/30s, safely under the 25/30s limit
 _MAX_RETRIES = 4
@@ -315,3 +316,118 @@ def fetch_patents(
 
         logger.info("EPO OPS | keyword=%r | done, yielded %d patents", keyword, fetched)
         time.sleep(_RATE_LIMIT_SECS)
+
+
+# ── Party enrichment (individual biblio endpoint) ─────────────────────────────
+
+def _parse_parties(doc: ET.Element) -> tuple[str, str]:
+    """Return (assignee, inventors) from an individual-endpoint exchange-document."""
+    biblio = doc.find("epo:bibliographic-data", _NS)
+    if biblio is None:
+        return "", ""
+
+    def _name(el: ET.Element) -> str:
+        return (
+            _text(el.find("epo:applicant-name/epo:name", _NS))
+            or _text(el.find("epo:inventor-name/epo:name", _NS))
+            or _text(el.find("epo:addressbook/epo:name", _NS))
+            or _text(el.find("epo:name", _NS))
+        )
+
+    app_els = (
+        biblio.findall(".//epo:applicant[@data-format='epodoc']", _NS)
+        or biblio.findall(".//epo:applicant", _NS)
+    )
+    assignee = "; ".join(n for n in (_name(a) for a in app_els) if n)
+
+    inv_els = (
+        biblio.findall(".//epo:inventor[@data-format='epodoc']", _NS)
+        or biblio.findall(".//epo:inventor", _NS)
+    )
+    inventors = ", ".join(n for n in (_name(i) for i in inv_els) if n)
+
+    return assignee, inventors
+
+
+def enrich_epo_patents(db_path: str) -> None:
+    """
+    Fetch individual biblio records for EPO patents that have empty assignees
+    and update them in the DB.  Safe to re-run — skips already-populated rows.
+    """
+    from backend.db.patents_schema import update_patent_parties
+
+    if not EPO_OPS_KEY or not EPO_OPS_SECRET:
+        logger.warning("EPO_OPS_KEY/SECRET not set — skipping enrichment")
+        return
+
+    from backend.db.schema import get_connection
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT patent_number FROM patents WHERE source='epo' AND (assignee IS NULL OR assignee='')"
+        ).fetchall()
+
+    if not rows:
+        logger.info("EPO enrich: nothing to do (all assignees populated)")
+        return
+
+    logger.info("EPO enrich: %d patents need party data", len(rows))
+
+    auth_session = requests.Session()
+    auth_session.headers.update({"User-Agent": "TechPulse/1.0"})
+    try:
+        token = _get_token(auth_session)
+    except Exception as exc:
+        logger.error("EPO enrich auth failed: %s", exc)
+        return
+
+    session = _make_session(token)
+    updated = 0
+
+    for (patent_number,) in rows:
+        url = _SINGLE_URL.format(number=patent_number)
+        delay = 2.0
+        for attempt in range(_MAX_RETRIES):
+            resp = session.get(url, timeout=30)
+
+            if resp.status_code == 401:
+                token = _get_token(auth_session)
+                session.headers.update({"Authorization": f"Bearer {token}"})
+                continue
+
+            if resp.status_code == 404:
+                logger.debug("EPO enrich: %s not found", patent_number)
+                break
+
+            if resp.status_code == 403:
+                logger.warning("EPO enrich: 403 rate limit hit after %d updates", updated)
+                return
+
+            if resp.status_code >= 500 or resp.status_code == 503:
+                time.sleep(delay)
+                delay *= 2
+                continue
+
+            if not resp.ok:
+                logger.debug("EPO enrich: %s → HTTP %d", patent_number, resp.status_code)
+                break
+
+            try:
+                root = ET.fromstring(resp.content)
+            except ET.ParseError:
+                break
+
+            docs = root.findall(".//{http://www.epo.org/exchange}exchange-document")
+            if not docs:
+                docs = root.findall(".//{http://ops.epo.org/3.2}exchange-document")
+
+            if docs:
+                assignee, inventors = _parse_parties(docs[0])
+                if assignee or inventors:
+                    update_patent_parties(db_path, patent_number, "epo", assignee, inventors)
+                    updated += 1
+                    logger.debug("EPO enrich: %s → %s", patent_number, assignee[:50] if assignee else "—")
+            break
+
+        time.sleep(_RATE_LIMIT_SECS)
+
+    logger.info("EPO enrich: done, updated %d / %d patents", updated, len(rows))
