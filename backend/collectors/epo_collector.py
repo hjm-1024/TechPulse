@@ -122,30 +122,37 @@ def _parse_document(doc: ET.Element, keyword: str) -> dict | None:
     if len(filing_date) == 8:
         filing_date = f"{filing_date[:4]}-{filing_date[4:6]}-{filing_date[6:]}"
 
-    # Inventors
-    inventors = ", ".join(
-        _text(inv.find("epo:name", _NS))
-        for inv in biblio.findall("epo:parties/epo:inventors/epo:inventor[@sequence]", _NS)
-    ) or ", ".join(
-        _text(inv.find("epo:name", _NS))
-        for inv in biblio.findall(".//epo:inventor", _NS)
-    )
+    # EPO party elements nest the name under <addressbook><name>
+    def _party_name(el: ET.Element) -> str:
+        return (
+            _text(el.find("epo:addressbook/epo:name", _NS))
+            or _text(el.find("epo:name", _NS))
+        )
 
-    # Applicants (assignees)
-    assignee = "; ".join(
-        _text(app.find("epo:name", _NS))
-        for app in biblio.findall(".//epo:applicant", _NS)
-        if app.get("data-format") != "original" or True
+    # Inventors — prefer epodoc format (standardised), fall back to any
+    inv_els = (
+        biblio.findall(".//epo:inventor[@data-format='epodoc']", _NS)
+        or biblio.findall(".//epo:inventor", _NS)
     )
+    inventors = ", ".join(n for n in (_party_name(i) for i in inv_els) if n)
 
-    # IPC codes
+    # Applicants (assignees) — epodoc format has the Latin-script name
+    app_els = (
+        biblio.findall(".//epo:applicant[@data-format='epodoc']", _NS)
+        or biblio.findall(".//epo:applicant", _NS)
+    )
+    assignee = "; ".join(n for n in (_party_name(a) for a in app_els) if n)
+
+    # IPC codes — build "H04W" style from section+class+subclass
     ipc_codes = ", ".join(
-        "".join([
-            _text(cl.find("epo:section", _NS)),
-            _text(cl.find("epo:class", _NS)),
-            _text(cl.find("epo:subclass", _NS)),
-        ]).strip()
-        for cl in biblio.findall(".//epo:classification-ipcr", _NS)
+        filter(None, (
+            (
+                _text(cl.find("epo:section", _NS))
+                + _text(cl.find("epo:class", _NS))
+                + _text(cl.find("epo:subclass", _NS))
+            ).strip()
+            for cl in biblio.findall(".//epo:classification-ipcr", _NS)
+        ))
     )
 
     return {
