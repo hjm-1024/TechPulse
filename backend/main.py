@@ -29,9 +29,9 @@ def startup():
     migrate_add_embeddings(DB_PATH)
 
 
-app.include_router(stats.router)
-app.include_router(papers.router)
-app.include_router(patents.router)
+app.include_router(stats.router,    prefix="/api")
+app.include_router(papers.router,   prefix="/api")
+app.include_router(patents.router,  prefix="/api")
 app.include_router(semantic.router)
 app.include_router(ai.router)
 
