@@ -5,7 +5,7 @@ Usage:
     python run_collectors.py                                    # all papers, 90 days
     python run_collectors.py --type papers --source arxiv
     python run_collectors.py --type patents                     # all patent sources
-    python run_collectors.py --type patents --source uspto --days 365
+    python run_collectors.py --type patents --source epo --days 1825
     python run_collectors.py --type all                         # papers + patents
 """
 
@@ -17,7 +17,7 @@ from backend.db.patents_schema import init_patents_db, upsert_patents
 from backend.collectors.arxiv_collector import fetch_papers as arxiv_fetch
 from backend.collectors.semantic_scholar_collector import fetch_papers as ss_fetch
 from backend.collectors.openalex_collector import fetch_papers as openalex_fetch
-from backend.collectors.uspto_collector import fetch_patents as uspto_fetch
+from backend.collectors.epo_collector import fetch_patents as epo_fetch
 from backend.collectors.kipris_collector import fetch_patents as kipris_fetch
 from backend.utils.logger import get_logger
 
@@ -30,7 +30,7 @@ _PAPER_SOURCES = {
 }
 
 _PATENT_SOURCES = {
-    "uspto": uspto_fetch,
+    "epo": epo_fetch,
     "kipris": kipris_fetch,
 }
 

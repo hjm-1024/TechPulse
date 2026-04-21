@@ -9,6 +9,8 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
 OPENALEX_EMAIL = os.getenv("OPENALEX_EMAIL", "")
 KIPRIS_API_KEY = os.getenv("KIPRIS_API_KEY", "")
+EPO_OPS_KEY    = os.getenv("EPO_OPS_KEY", "")
+EPO_OPS_SECRET = os.getenv("EPO_OPS_SECRET", "")
 
 KEYWORDS = [
     "physical AI",
