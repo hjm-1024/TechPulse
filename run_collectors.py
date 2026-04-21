@@ -98,8 +98,27 @@ def _run_embed() -> None:
         logger.info("embed: %s — finished %d / %d", table, done, len(rows))
 
 
+def _run_clean_names() -> None:
+    from backend.db.schema import get_connection
+    from backend.utils.text_utils import clean_assignee, clean_inventors
+    with get_connection(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, assignee, inventors FROM patents WHERE assignee IS NOT NULL OR inventors IS NOT NULL"
+        ).fetchall()
+    updated = 0
+    for row in rows:
+        new_a = clean_assignee(row["assignee"] or "")
+        new_i = clean_inventors(row["inventors"] or "")
+        if new_a != (row["assignee"] or "") or new_i != (row["inventors"] or ""):
+            with get_connection(DB_PATH) as conn:
+                conn.execute("UPDATE patents SET assignee=?, inventors=? WHERE id=?",
+                             (new_a, new_i, row["id"]))
+            updated += 1
+    logger.info("clean-names: updated %d / %d patent records", updated, len(rows))
+
+
 def run(data_type: str, source: str, days_back: int, enrich: bool = False,
-        embed: bool = False) -> None:
+        embed: bool = False, clean_names: bool = False) -> None:
     init_db(DB_PATH)
     init_patents_db(DB_PATH)
     migrate_add_embeddings(DB_PATH)
@@ -112,6 +131,11 @@ def run(data_type: str, source: str, days_back: int, enrich: bool = False,
     if embed:
         logger.info("=== Embedding generation ===")
         _run_embed()
+        return
+
+    if clean_names:
+        logger.info("=== Cleaning party names ===")
+        _run_clean_names()
         return
 
     if data_type in ("papers", "all"):
@@ -155,6 +179,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Generate nomic-embed-text embeddings for all papers/patents (requires Ollama)",
     )
+    parser.add_argument(
+        "--clean-names",
+        action="store_true",
+        dest="clean_names",
+        help="Remove EPO [XX] country suffixes from assignee/inventor names in DB",
+    )
     args = parser.parse_args()
     run(data_type=args.type, source=args.source, days_back=args.days,
-        enrich=args.enrich, embed=args.embed)
+        enrich=args.enrich, embed=args.embed, clean_names=args.clean_names)

@@ -8,6 +8,7 @@
 from fastapi import APIRouter, Query
 from backend.config import DB_PATH
 from backend.db.schema import get_connection
+from backend.utils.text_utils import clean_assignee, clean_inventors
 
 router = APIRouter(prefix="/patents", tags=["patents"])
 
@@ -148,10 +149,16 @@ def list_patents(
             [*params, page_size, offset],
         ).fetchall()
 
+    def _clean(r):
+        d = dict(r)
+        d["assignee"] = clean_assignee(d.get("assignee", ""))
+        d["inventors"] = clean_inventors(d.get("inventors", ""))
+        return d
+
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
         "pages": -(-total // page_size),
-        "items": [dict(r) for r in rows],
+        "items": [_clean(r) for r in rows],
     }

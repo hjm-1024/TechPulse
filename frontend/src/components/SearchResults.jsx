@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import SimilarDocs from "./SimilarDocs";
 
 const DOMAIN_COLOR  = { physical_ai_robotics: "#10b981", telecom_6g: "#f59e0b" };
 const DOMAIN_LABEL  = { physical_ai_robotics: "Robotics", telecom_6g: "6G" };
@@ -102,6 +103,10 @@ function PaperCard({ paper }) {
           )}
         </>
       )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+        <SimilarDocs id={paper.id} type="papers" limit={5} />
+        <SimilarDocs id={paper.id} type="papers" crossType="patents" limit={4} />
+      </div>
       <AISummary title={paper.title} abstract={paper.abstract} type="paper" />
     </div>
   );
@@ -195,6 +200,10 @@ function PatentCard({ patent }) {
           )}
         </>
       )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+        <SimilarDocs id={patent.id} type="patents" limit={5} />
+        <SimilarDocs id={patent.id} type="patents" crossType="papers" limit={4} />
+      </div>
       <AISummary title={patent.title} abstract={patent.abstract} type="patent" />
     </div>
   );
