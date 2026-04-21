@@ -19,6 +19,7 @@ from backend.collectors.semantic_scholar_collector import fetch_papers as ss_fet
 from backend.collectors.openalex_collector import fetch_papers as openalex_fetch
 from backend.collectors.lens_collector import fetch_patents as lens_fetch
 from backend.collectors.epo_collector import fetch_patents as epo_fetch, enrich_epo_patents
+from backend.db.schema import migrate_add_embeddings
 from backend.collectors.kipris_collector import fetch_patents as kipris_fetch
 from backend.utils.logger import get_logger
 
@@ -61,13 +62,56 @@ def _run_patents(source: str, days_back: int) -> None:
             logger.error("%s failed: %s", name, exc, exc_info=True)
 
 
-def run(data_type: str, source: str, days_back: int, enrich: bool = False) -> None:
+def _run_embed() -> None:
+    from backend.utils.embeddings import embed_record, embed_text
+    from backend.db.schema import get_connection
+
+    # Quick check Ollama is up
+    if embed_text("test") is None:
+        logger.error("Ollama not reachable at localhost:11434 — is it running?")
+        return
+
+    for table, id_col in (("papers", "id"), ("patents", "id")):
+        with get_connection(DB_PATH) as conn:
+            rows = conn.execute(
+                f"SELECT id, title, abstract FROM {table} WHERE embedding IS NULL"
+            ).fetchall()
+
+        if not rows:
+            logger.info("embed: %s — nothing to do", table)
+            continue
+
+        logger.info("embed: %s — %d records to embed", table, len(rows))
+        done = 0
+        for row in rows:
+            vec = embed_record(row["title"], row["abstract"] or "")
+            if vec is not None:
+                with get_connection(DB_PATH) as conn:
+                    conn.execute(
+                        f"UPDATE {table} SET embedding=? WHERE id=?",
+                        (vec.tobytes(), row["id"]),
+                    )
+                done += 1
+                if done % 100 == 0:
+                    logger.info("embed: %s — %d / %d done", table, done, len(rows))
+
+        logger.info("embed: %s — finished %d / %d", table, done, len(rows))
+
+
+def run(data_type: str, source: str, days_back: int, enrich: bool = False,
+        embed: bool = False) -> None:
     init_db(DB_PATH)
     init_patents_db(DB_PATH)
+    migrate_add_embeddings(DB_PATH)
 
     if enrich:
         logger.info("=== EPO party enrichment ===")
         enrich_epo_patents(DB_PATH)
+        return
+
+    if embed:
+        logger.info("=== Embedding generation ===")
+        _run_embed()
         return
 
     if data_type in ("papers", "all"):
@@ -106,5 +150,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Fill in missing EPO assignee/inventor data via individual patent lookups",
     )
+    parser.add_argument(
+        "--embed",
+        action="store_true",
+        help="Generate nomic-embed-text embeddings for all papers/patents (requires Ollama)",
+    )
     args = parser.parse_args()
-    run(data_type=args.type, source=args.source, days_back=args.days, enrich=args.enrich)
+    run(data_type=args.type, source=args.source, days_back=args.days,
+        enrich=args.enrich, embed=args.embed)

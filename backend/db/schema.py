@@ -44,6 +44,17 @@ def get_connection(db_path: str):
         conn.close()
 
 
+def migrate_add_embeddings(db_path: str) -> None:
+    """Safe migration: add embedding BLOB column to papers and patents if missing."""
+    with get_connection(db_path) as conn:
+        for table in ("papers", "patents"):
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN embedding BLOB")
+                logger.info("Migration: added embedding column to %s", table)
+            except Exception:
+                pass  # column already exists
+
+
 def init_db(db_path: str) -> None:
     with get_connection(db_path) as conn:
         conn.execute(CREATE_PAPERS_TABLE)

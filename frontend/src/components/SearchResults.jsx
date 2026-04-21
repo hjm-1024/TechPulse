@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 const DOMAIN_COLOR  = { physical_ai_robotics: "#10b981", telecom_6g: "#f59e0b" };
 const DOMAIN_LABEL  = { physical_ai_robotics: "Robotics", telecom_6g: "6G" };
@@ -68,6 +68,7 @@ function PaperCard({ paper }) {
           {paper.citation_count > 0 && (
             <span style={s.citations}>↑ {paper.citation_count.toLocaleString()}</span>
           )}
+          <SimilarityBadge score={paper.similarity} />
         </div>
         <span style={s.year}>{(paper.published_date || "").slice(0, 4)}</span>
       </div>
@@ -101,6 +102,7 @@ function PaperCard({ paper }) {
           )}
         </>
       )}
+      <AISummary title={paper.title} abstract={paper.abstract} type="paper" />
     </div>
   );
 }
@@ -126,6 +128,7 @@ function PatentCard({ patent }) {
               {kind} · {kindLabel}
             </Badge>
           )}
+          <SimilarityBadge score={patent.similarity} />
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <a href={espacenetUrl(patent.patent_number)} target="_blank" rel="noreferrer" style={s.extLink}>
@@ -192,6 +195,7 @@ function PatentCard({ patent }) {
           )}
         </>
       )}
+      <AISummary title={patent.title} abstract={patent.abstract} type="patent" />
     </div>
   );
 }
@@ -281,6 +285,73 @@ function MetaItem({ label, value, mono = false }) {
   );
 }
 
+function SimilarityBadge({ score }) {
+  if (score == null) return null;
+  const pct = Math.round(score * 100);
+  const color = pct >= 80 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#64748b";
+  return (
+    <span style={{ ...s.badge, background: color + "22", color, fontFamily: "monospace" }}>
+      {pct}% 유사
+    </span>
+  );
+}
+
+function AISummary({ title, abstract, type }) {
+  const [summary, setSummary]   = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [open, setOpen]         = useState(false);
+  const abortRef                = useRef(null);
+
+  async function handleClick() {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (summary) return;  // already generated
+
+    setLoading(true);
+    setSummary("");
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+
+    try {
+      const resp = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, abstract, type }),
+        signal: abortRef.current.signal,
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        setSummary(text);
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") setSummary(`오류: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button onClick={handleClick} style={s.aiBtn}>
+        {loading ? "✨ AI 요약 중…" : open ? "✨ AI 요약 닫기 ▲" : "✨ AI 한국어 요약"}
+      </button>
+      {open && summary && (
+        <div style={s.aiSummary}>
+          <span style={s.aiLabel}>AI 요약 (qwen)</span>
+          <p style={s.aiText}>{summary}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Notice({ text }) {
   return <div style={s.notice}>{text}</div>;
 }
@@ -362,4 +433,15 @@ const s = {
   pageBtnActive: { background: "#3b82f6", borderColor: "#3b82f6", color: "#fff" },
   ellipsis: { color: "#64748b", padding: "6px 4px", fontSize: 13 },
   notice: { color: "#64748b", textAlign: "center", padding: "60px 0", fontSize: 14 },
+  aiBtn: {
+    background: "none", border: "1px solid #4c1d95", borderRadius: 6,
+    color: "#a78bfa", cursor: "pointer", fontSize: 12, padding: "5px 12px",
+    transition: "all 0.15s",
+  },
+  aiSummary: {
+    background: "#1a0a2e", border: "1px solid #4c1d95", borderRadius: 8,
+    padding: "12px 16px", marginTop: 8,
+  },
+  aiLabel: { fontSize: 10, color: "#7c3aed", textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 6 },
+  aiText: { fontSize: 13, color: "#c4b5fd", lineHeight: 1.7, margin: 0 },
 };

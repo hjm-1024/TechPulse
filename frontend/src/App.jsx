@@ -98,6 +98,7 @@ export default function App() {
           <>
             <SearchBar
               type={search.type}       setType={search.setType}
+              mode={search.mode}       setMode={search.setMode}
               query={search.query}     setQuery={search.setQuery}
               domain={search.domain}   setDomain={search.setDomain}
               source={search.source}   setSource={search.setSource}
