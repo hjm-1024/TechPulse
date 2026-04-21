@@ -17,6 +17,7 @@ from backend.db.patents_schema import init_patents_db, upsert_patents
 from backend.collectors.arxiv_collector import fetch_papers as arxiv_fetch
 from backend.collectors.semantic_scholar_collector import fetch_papers as ss_fetch
 from backend.collectors.openalex_collector import fetch_papers as openalex_fetch
+from backend.collectors.ppubs_collector import fetch_patents as ppubs_fetch
 from backend.collectors.epo_collector import fetch_patents as epo_fetch
 from backend.collectors.kipris_collector import fetch_patents as kipris_fetch
 from backend.utils.logger import get_logger
@@ -30,8 +31,9 @@ _PAPER_SOURCES = {
 }
 
 _PATENT_SOURCES = {
-    "epo": epo_fetch,
-    "kipris": kipris_fetch,
+    "ppubs": ppubs_fetch,    # USPTO Patent Public Search (no key needed)
+    "epo": epo_fetch,        # EPO OPS worldwide (free key from developers.epo.org)
+    "kipris": kipris_fetch,  # Korean patents (free key from data.go.kr)
 }
 
 
