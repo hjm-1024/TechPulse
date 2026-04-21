@@ -8,7 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import DB_PATH
 from backend.db.schema import init_db
-from backend.routers import papers, stats
+from backend.db.patents_schema import init_patents_db
+from backend.routers import papers, stats, patents
 
 app = FastAPI(title="TechPulse API", version="1.0.0")
 
@@ -23,10 +24,12 @@ app.add_middleware(
 @app.on_event("startup")
 def startup():
     init_db(DB_PATH)
+    init_patents_db(DB_PATH)
 
 
 app.include_router(stats.router, prefix="/api")
 app.include_router(papers.router, prefix="/api")
+app.include_router(patents.router, prefix="/api")
 
 
 @app.get("/api/health")

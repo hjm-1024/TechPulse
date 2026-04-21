@@ -2,58 +2,91 @@
 Entry point: run enabled collectors and persist results to SQLite.
 
 Usage:
-    python run_collectors.py                          # all sources, 90 days back
-    python run_collectors.py --days 30                # custom lookback
-    python run_collectors.py --source arxiv           # single source
-    python run_collectors.py --source semantic_scholar
-    python run_collectors.py --source openalex
-    python run_collectors.py --source all             # explicit all (default)
+    python run_collectors.py                                    # all papers, 90 days
+    python run_collectors.py --type papers --source arxiv
+    python run_collectors.py --type patents                     # all patent sources
+    python run_collectors.py --type patents --source patentsview --days 365
+    python run_collectors.py --type all                         # papers + patents
 """
 
 import argparse
 
 from backend.config import DB_PATH, KEYWORDS
 from backend.db.schema import init_db, upsert_papers
+from backend.db.patents_schema import init_patents_db, upsert_patents
 from backend.collectors.arxiv_collector import fetch_papers as arxiv_fetch
 from backend.collectors.semantic_scholar_collector import fetch_papers as ss_fetch
 from backend.collectors.openalex_collector import fetch_papers as openalex_fetch
+from backend.collectors.patentsview_collector import fetch_patents as patentsview_fetch
+from backend.collectors.kipris_collector import fetch_patents as kipris_fetch
 from backend.utils.logger import get_logger
 
 logger = get_logger("run_collectors")
 
-_SOURCES = {
+_PAPER_SOURCES = {
     "arxiv": arxiv_fetch,
     "semantic_scholar": ss_fetch,
     "openalex": openalex_fetch,
 }
 
-
-def _run_source(name: str, fetch_fn, days_back: int) -> None:
-    logger.info("=== Starting %s collection (days_back=%d) ===", name, days_back)
-    try:
-        papers = list(fetch_fn(keywords=KEYWORDS, days_back=days_back))
-        inserted, skipped = upsert_papers(DB_PATH, papers)
-        logger.info("%s done | inserted=%d skipped=%d", name, inserted, skipped)
-    except Exception as exc:
-        logger.error("%s collection failed: %s", name, exc, exc_info=True)
+_PATENT_SOURCES = {
+    "patentsview": patentsview_fetch,
+    "kipris": kipris_fetch,
+}
 
 
-def run(source: str = "all", days_back: int = 90) -> None:
-    init_db(DB_PATH)
-
-    targets = _SOURCES if source == "all" else {source: _SOURCES[source]}
-
+def _run_papers(source: str, days_back: int) -> None:
+    targets = _PAPER_SOURCES if source == "all" else {source: _PAPER_SOURCES[source]}
     for name, fetch_fn in targets.items():
-        _run_source(name, fetch_fn, days_back)
+        logger.info("=== Papers: %s (days_back=%d) ===", name, days_back)
+        try:
+            papers = list(fetch_fn(keywords=KEYWORDS, days_back=days_back))
+            inserted, skipped = upsert_papers(DB_PATH, papers)
+            logger.info("%s done | inserted=%d skipped=%d", name, inserted, skipped)
+        except Exception as exc:
+            logger.error("%s failed: %s", name, exc, exc_info=True)
+
+
+def _run_patents(source: str, days_back: int) -> None:
+    targets = _PATENT_SOURCES if source == "all" else {source: _PATENT_SOURCES[source]}
+    for name, fetch_fn in targets.items():
+        logger.info("=== Patents: %s (days_back=%d) ===", name, days_back)
+        try:
+            patents = list(fetch_fn(keywords=KEYWORDS, days_back=days_back))
+            inserted, skipped = upsert_patents(DB_PATH, patents)
+            logger.info("%s done | inserted=%d skipped=%d", name, inserted, skipped)
+        except Exception as exc:
+            logger.error("%s failed: %s", name, exc, exc_info=True)
+
+
+def run(data_type: str, source: str, days_back: int) -> None:
+    init_db(DB_PATH)
+    init_patents_db(DB_PATH)
+
+    if data_type in ("papers", "all"):
+        paper_source = source if source in _PAPER_SOURCES else "all"
+        _run_papers(paper_source, days_back)
+
+    if data_type in ("patents", "all"):
+        patent_source = source if source in _PATENT_SOURCES else "all"
+        _run_patents(patent_source, days_back)
 
 
 if __name__ == "__main__":
+    all_sources = [*_PAPER_SOURCES.keys(), *_PATENT_SOURCES.keys(), "all"]
+
     parser = argparse.ArgumentParser(description="TechPulse data collector")
     parser.add_argument(
+        "--type",
+        choices=["papers", "patents", "all"],
+        default="papers",
+        help="Data type to collect (default: papers)",
+    )
+    parser.add_argument(
         "--source",
-        choices=[*_SOURCES.keys(), "all"],
+        choices=all_sources,
         default="all",
-        help="Which collector to run (default: all)",
+        help="Specific source to run (default: all)",
     )
     parser.add_argument(
         "--days",
@@ -62,4 +95,4 @@ if __name__ == "__main__":
         help="Days of history to fetch (default: 90)",
     )
     args = parser.parse_args()
-    run(source=args.source, days_back=args.days)
+    run(data_type=args.type, source=args.source, days_back=args.days)
