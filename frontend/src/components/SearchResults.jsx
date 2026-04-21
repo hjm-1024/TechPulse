@@ -7,6 +7,32 @@ const SOURCE_COLOR  = {
   epo: "#ef4444", kipris: "#3b82f6",
 };
 
+const COUNTRY_NAME = {
+  US: "미국", KR: "한국", CN: "중국", JP: "일본", EP: "유럽(EP)",
+  WO: "국제(PCT)", DE: "독일", FR: "프랑스", GB: "영국", TW: "대만",
+};
+
+// Kind codes: what type of document is this?
+const KIND_LABEL = {
+  A: "출원공개", A1: "출원공개", A2: "출원공개(2차)", A3: "조사보고서",
+  B: "등록특허", B1: "등록특허", B2: "재심사후 등록",
+  C: "수정본", U: "실용신안",
+};
+
+function extractKind(patentNumber) {
+  const m = patentNumber?.match(/([A-Z]\d?)$/);
+  return m ? m[1] : null;
+}
+
+function ipcLink(code) {
+  const clean = code.trim().replace(/\s+/g, "");
+  return `https://www.ipcpub.wipo.int/?section=${clean[0]}&class=${clean.slice(1,3)}&subclass=${clean[3]}&version=20240101&symbol=${encodeURIComponent(clean)}`;
+}
+
+function espacenetUrl(num) {
+  return `https://worldwide.espacenet.com/patent/search?q=pn%3D${encodeURIComponent(num)}`;
+}
+
 export default function SearchResults({ results, loading, error, type, page, setPage }) {
   if (error) return <Notice text={`Error: ${error}`} />;
   if (loading && !results) return <LoadingSkeleton />;
@@ -83,40 +109,114 @@ function PatentCard({ patent }) {
   const [open, setOpen] = useState(false);
   const domainColor = DOMAIN_COLOR[patent.domain_tag] ?? "#64748b";
   const srcColor    = SOURCE_COLOR[patent.source] ?? "#94a3b8";
+  const kind        = extractKind(patent.patent_number);
+  const kindLabel   = kind ? KIND_LABEL[kind] : null;
+  const countryName = COUNTRY_NAME[patent.country] ?? patent.country;
 
   return (
     <div style={s.card}>
+      {/* Top row: badges + links */}
       <div style={s.cardTop}>
         <div style={s.badges}>
           <Badge color={srcColor}>{patent.source?.toUpperCase()}</Badge>
           <Badge color={domainColor}>{DOMAIN_LABEL[patent.domain_tag] ?? patent.domain_tag}</Badge>
-          {patent.country && <Badge color="#64748b">{patent.country}</Badge>}
+          {countryName && <Badge color="#64748b">{countryName}</Badge>}
+          {kindLabel && (
+            <Badge color={kind?.startsWith("B") ? "#10b981" : "#94a3b8"}>
+              {kind} · {kindLabel}
+            </Badge>
+          )}
         </div>
-        <span style={s.year}>{(patent.publication_date || "").slice(0, 4)}</span>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <a href={espacenetUrl(patent.patent_number)} target="_blank" rel="noreferrer" style={s.extLink}>
+            Espacenet ↗
+          </a>
+          <a href={`https://patents.google.com/patent/${patent.patent_number}`} target="_blank" rel="noreferrer" style={s.extLink}>
+            Google Patents ↗
+          </a>
+        </div>
       </div>
 
+      {/* Title */}
       <h3 style={s.title}>{patent.title}</h3>
 
-      <div style={s.metaRow}>
-        <MetaItem label="Patent" value={patent.patent_number} mono />
-        {patent.assignee && <MetaItem label="Assignee" value={truncate(patent.assignee, 60)} />}
-        {patent.inventors && <MetaItem label="Inventors" value={truncateAuthors(patent.inventors)} />}
-        {patent.ipc_codes && <MetaItem label="IPC" value={patent.ipc_codes} mono />}
-        {patent.filing_date && <MetaItem label="Filed" value={patent.filing_date.slice(0, 10)} />}
+      {/* Primary info grid */}
+      <div style={s.infoGrid}>
+        <InfoBlock label="특허번호 (Patent No.)" value={patent.patent_number} mono />
+        {patent.assignee
+          ? <InfoBlock label="출원인 / 권리자 (Applicant)" value={patent.assignee} />
+          : <InfoBlock label="출원인 / 권리자 (Applicant)" value="—" muted />}
+        {patent.inventors
+          ? <InfoBlock label="발명자 (Inventors)" value={truncateAuthors(patent.inventors)} />
+          : <InfoBlock label="발명자 (Inventors)" value="—" muted />}
       </div>
 
+      {/* Dates row */}
+      <div style={s.datesRow}>
+        {patent.filing_date && (
+          <DateBlock label="출원일 (Filing Date)" value={patent.filing_date.slice(0, 10)}
+            note="특허 신청한 날짜 — 권리 시작점" />
+        )}
+        {patent.publication_date && (
+          <DateBlock label="공개일 (Publication Date)" value={patent.publication_date.slice(0, 10)}
+            note="공중에 공개된 날짜" />
+        )}
+      </div>
+
+      {/* IPC classification */}
+      {patent.ipc_codes && (
+        <div style={s.ipcBlock}>
+          <span style={s.ipcLabel}>IPC 기술분류</span>
+          <div style={s.ipcTags}>
+            {patent.ipc_codes.split(",").map(code => code.trim()).filter(Boolean).map(code => (
+              <a key={code} href={ipcLink(code)} target="_blank" rel="noreferrer" style={s.ipcTag}>
+                {code}
+              </a>
+            ))}
+          </div>
+          <span style={s.ipcHint}>클릭하면 WIPO IPC 분류 설명 확인</span>
+        </div>
+      )}
+
+      {/* Abstract */}
       {patent.abstract && (
         <>
-          <p style={{ ...s.abstract, WebkitLineClamp: open ? "unset" : 3 }}>
+          <div style={s.abstractLabel}>초록 (Abstract)</div>
+          <p style={{ ...s.abstract, WebkitLineClamp: open ? "unset" : 4 }}>
             {patent.abstract}
           </p>
-          {patent.abstract.length > 200 && (
+          {patent.abstract.length > 250 && (
             <button onClick={() => setOpen(!open)} style={s.toggle}>
-              {open ? "Show less ▲" : "Show more ▼"}
+              {open ? "접기 ▲" : "더 보기 ▼"}
             </button>
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function InfoBlock({ label, value, mono = false, muted = false }) {
+  return (
+    <div style={s.infoBlock}>
+      <span style={s.infoLabel}>{label}</span>
+      <span style={{
+        ...s.infoValue,
+        ...(mono ? { fontFamily: "monospace", fontSize: 12 } : {}),
+        ...(muted ? { color: "#475569" } : {}),
+      }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function DateBlock({ label, value, note }) {
+  return (
+    <div style={s.dateBlock}>
+      <span style={s.infoLabel}>{label}</span>
+      <span style={s.dateValue}>{value}</span>
+      {note && <span style={s.dateNote}>{note}</span>}
     </div>
   );
 }
@@ -225,8 +325,27 @@ const s = {
   metaItem: { display: "flex", flexDirection: "column", gap: 2 },
   metaLabel: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 },
   metaValue: { fontSize: 12, color: "#cbd5e1" },
+  extLink: { fontSize: 11, color: "#60a5fa", textDecoration: "none", flexShrink: 0 },
+  infoGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px 20px", margin: "12px 0" },
+  infoBlock: { display: "flex", flexDirection: "column", gap: 3 },
+  infoLabel: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 },
+  infoValue: { fontSize: 13, color: "#e2e8f0" },
+  datesRow: { display: "flex", gap: 24, marginBottom: 12, flexWrap: "wrap" },
+  dateBlock: { display: "flex", flexDirection: "column", gap: 2 },
+  dateValue: { fontSize: 14, color: "#f1f5f9", fontWeight: 600, fontFamily: "monospace" },
+  dateNote:  { fontSize: 10, color: "#475569", fontStyle: "italic", marginTop: 1 },
+  ipcBlock:  { marginBottom: 12 },
+  ipcLabel:  { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 6 },
+  ipcTags:   { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 },
+  ipcTag: {
+    background: "#0f172a", border: "1px solid #334155", borderRadius: 4,
+    color: "#93c5fd", padding: "2px 8px", fontSize: 11, fontFamily: "monospace",
+    textDecoration: "none", cursor: "pointer",
+  },
+  ipcHint: { fontSize: 10, color: "#334155", fontStyle: "italic" },
+  abstractLabel: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 },
   abstract: {
-    fontSize: 13, color: "#94a3b8", lineHeight: 1.6, marginTop: 10,
+    fontSize: 13, color: "#94a3b8", lineHeight: 1.6, marginTop: 0,
     display: "-webkit-box", WebkitBoxOrient: "vertical", overflow: "hidden",
   },
   toggle: {
