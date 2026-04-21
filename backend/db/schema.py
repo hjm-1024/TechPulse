@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from backend.utils.logger import get_logger
 
@@ -27,12 +28,20 @@ CREATE_IDX_DOMAIN = "CREATE INDEX IF NOT EXISTS idx_domain ON papers(domain_tag)
 CREATE_IDX_DATE = "CREATE INDEX IF NOT EXISTS idx_date ON papers(published_date)"
 
 
-def get_connection(db_path: str) -> sqlite3.Connection:
+@contextmanager
+def get_connection(db_path: str):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def init_db(db_path: str) -> None:
@@ -41,7 +50,7 @@ def init_db(db_path: str) -> None:
         conn.execute(CREATE_IDX_DOI)
         conn.execute(CREATE_IDX_DOMAIN)
         conn.execute(CREATE_IDX_DATE)
-        conn.commit()
+
     logger.info("Database initialised at %s", db_path)
 
 
@@ -65,5 +74,5 @@ def upsert_papers(db_path: str, papers: list[dict]) -> tuple[int, int]:
                 inserted += 1
             except sqlite3.IntegrityError:
                 skipped += 1
-        conn.commit()
+
     return inserted, skipped

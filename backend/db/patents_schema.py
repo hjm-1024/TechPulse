@@ -34,7 +34,6 @@ def init_patents_db(db_path: str) -> None:
         conn.execute(CREATE_IDX_PATENT_DOMAIN)
         conn.execute(CREATE_IDX_PATENT_DATE)
         conn.execute(CREATE_IDX_PATENT_SRC)
-        conn.commit()
     logger.info("Patents table initialised at %s", db_path)
 
 
@@ -46,7 +45,6 @@ def update_patent_parties(db_path: str, patent_number: str, source: str,
             "UPDATE patents SET assignee=?, inventors=? WHERE patent_number=? AND source=?",
             (assignee, inventors, patent_number, source),
         )
-        conn.commit()
         return cur.rowcount > 0
 
 
@@ -72,5 +70,4 @@ def upsert_patents(db_path: str, patents: list[dict]) -> tuple[int, int]:
                 inserted += 1
             except sqlite3.IntegrityError:
                 skipped += 1
-        conn.commit()
     return inserted, skipped
