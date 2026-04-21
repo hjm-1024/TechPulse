@@ -122,21 +122,25 @@ def _parse_document(doc: ET.Element, keyword: str) -> dict | None:
     if len(filing_date) == 8:
         filing_date = f"{filing_date[:4]}-{filing_date[4:6]}-{filing_date[6:]}"
 
-    # EPO party elements nest the name under <addressbook><name>
+    # EPO uses different structures per data-format:
+    #   epodoc:   <applicant-name><name> or <inventor-name><name>
+    #   original: <addressbook><name>
     def _party_name(el: ET.Element) -> str:
         return (
-            _text(el.find("epo:addressbook/epo:name", _NS))
-            or _text(el.find("epo:name", _NS))
+            _text(el.find("epo:applicant-name/epo:name", _NS))   # applicant epodoc
+            or _text(el.find("epo:inventor-name/epo:name", _NS))  # inventor epodoc
+            or _text(el.find("epo:addressbook/epo:name", _NS))    # original format
+            or _text(el.find("epo:name", _NS))                    # bare fallback
         )
 
-    # Inventors — prefer epodoc format (standardised), fall back to any
+    # Inventors — epodoc format first (Latin-script), fall back to all
     inv_els = (
         biblio.findall(".//epo:inventor[@data-format='epodoc']", _NS)
         or biblio.findall(".//epo:inventor", _NS)
     )
     inventors = ", ".join(n for n in (_party_name(i) for i in inv_els) if n)
 
-    # Applicants (assignees) — epodoc format has the Latin-script name
+    # Applicants (assignees) — epodoc format first
     app_els = (
         biblio.findall(".//epo:applicant[@data-format='epodoc']", _NS)
         or biblio.findall(".//epo:applicant", _NS)
@@ -233,6 +237,11 @@ def _fetch_page(
         docs = root.findall(".//{http://www.epo.org/exchange}exchange-document")
         if not docs:
             docs = root.findall(".//{http://ops.epo.org/3.2}exchange-document")
+
+        # Log one raw XML sample on first page so we can verify parse paths
+        if docs and logger.isEnabledFor(10):  # DEBUG level
+            import xml.etree.ElementTree as _ET
+            logger.debug("EPO sample XML:\n%s", _ET.tostring(docs[0], encoding="unicode")[:1500])
 
         logger.debug("EPO OPS page: docs=%d total=%d", len(docs), total)
         return docs, total
