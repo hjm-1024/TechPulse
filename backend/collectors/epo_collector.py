@@ -216,15 +216,18 @@ def _fetch_page(
             logger.error("EPO OPS XML parse error: %s", exc)
             return [], 0
 
-        # Total count from X-OPS-Total-Count header (more reliable than XML)
+        # Total count: try header first, then XML ops:biblio-search/@total
         total = int(resp.headers.get("X-OPS-Total-Count", 0))
+        if not total:
+            search_el = root.find("ops:biblio-search", _NS)
+            if search_el is not None:
+                total = int(search_el.get("total-result-count", 0))
 
-        docs = root.findall(".//ops:publication-reference/../..", _NS)
-        # Simpler: find all exchange-document elements
         docs = root.findall(".//{http://www.epo.org/exchange}exchange-document")
         if not docs:
             docs = root.findall(".//{http://ops.epo.org/3.2}exchange-document")
 
+        logger.debug("EPO OPS page: docs=%d total=%d", len(docs), total)
         return docs, total
 
     raise requests.RequestException(f"EPO OPS: gave up after {_MAX_RETRIES} retries")
@@ -286,7 +289,10 @@ def fetch_patents(
             logger.debug("EPO OPS | keyword=%r | fetched=%d / total=%d", keyword, fetched, total)
 
             start += _BATCH_SIZE
-            if start > min(total, max_per_keyword):
+            # Stop if we got a partial batch (end of results) or exceeded limits
+            if len(docs) < _BATCH_SIZE:
+                break
+            if total and start > min(total, max_per_keyword):
                 break
 
             time.sleep(_RATE_LIMIT_SECS)
