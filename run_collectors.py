@@ -12,7 +12,7 @@ Usage:
 import argparse
 
 from backend.config import DB_PATH, KEYWORDS
-from backend.db.schema import init_db, upsert_papers
+from backend.db.schema import init_db, upsert_papers, dedup_papers
 from backend.db.patents_schema import init_patents_db, upsert_patents
 from backend.collectors.arxiv_collector import fetch_papers as arxiv_fetch
 from backend.collectors.semantic_scholar_collector import fetch_papers as ss_fetch
@@ -44,8 +44,8 @@ def _run_papers(source: str, days_back: int) -> None:
         logger.info("=== Papers: %s (days_back=%d) ===", name, days_back)
         try:
             papers = list(fetch_fn(keywords=KEYWORDS, days_back=days_back))
-            inserted, skipped = upsert_papers(DB_PATH, papers)
-            logger.info("%s done | inserted=%d skipped=%d", name, inserted, skipped)
+            inserted, updated, skipped = upsert_papers(DB_PATH, papers)
+            logger.info("%s done | inserted=%d updated=%d skipped=%d", name, inserted, updated, skipped)
         except Exception as exc:
             logger.error("%s failed: %s", name, exc, exc_info=True)
 
@@ -118,7 +118,7 @@ def _run_clean_names() -> None:
 
 
 def run(data_type: str, source: str, days_back: int, enrich: bool = False,
-        embed: bool = False, clean_names: bool = False) -> None:
+        embed: bool = False, clean_names: bool = False, **kwargs) -> None:
     init_db(DB_PATH)
     init_patents_db(DB_PATH)
     migrate_add_embeddings(DB_PATH)
@@ -136,6 +136,13 @@ def run(data_type: str, source: str, days_back: int, enrich: bool = False,
     if clean_names:
         logger.info("=== Cleaning party names ===")
         _run_clean_names()
+        return
+
+    if kwargs.get("dedup"):
+        dry_run = kwargs.get("dry_run", False)
+        logger.info("=== Cross-source deduplication%s ===", " [dry-run]" if dry_run else "")
+        groups, removed = dedup_papers(DB_PATH, dry_run=dry_run)
+        logger.info("dedup done | duplicate_groups=%d records_removed=%d", groups, removed)
         return
 
     if data_type in ("papers", "all"):
@@ -185,6 +192,18 @@ if __name__ == "__main__":
         dest="clean_names",
         help="Remove EPO [XX] country suffixes from assignee/inventor names in DB",
     )
+    parser.add_argument(
+        "--dedup",
+        action="store_true",
+        help="Find and remove cross-source duplicate papers by normalized title",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="With --dedup: log what would be removed without deleting anything",
+    )
     args = parser.parse_args()
     run(data_type=args.type, source=args.source, days_back=args.days,
-        enrich=args.enrich, embed=args.embed, clean_names=args.clean_names)
+        enrich=args.enrich, embed=args.embed, clean_names=args.clean_names,
+        dedup=args.dedup, dry_run=args.dry_run)

@@ -8,8 +8,7 @@ import TopPapers from "./components/TopPapers";
 import PatentStats from "./components/PatentStats";
 import PatentTrendChart from "./components/PatentTrendChart";
 import TopAssignees from "./components/TopAssignees";
-import SearchBar from "./components/SearchBar";
-import SearchResults from "./components/SearchResults";
+import SearchPage from "./components/SearchPage";
 import EmergingPapers from "./components/EmergingPapers";
 import NetworkGraph from "./components/NetworkGraph";
 import CollectionConfig from "./components/CollectionConfig";
@@ -99,27 +98,7 @@ export default function App() {
         )}
 
         {/* ── Search ── */}
-        {tab === "search" && (
-          <>
-            <SearchBar
-              type={search.type}       setType={search.setType}
-              mode={search.mode}       setMode={search.setMode}
-              query={search.query}     setQuery={search.setQuery}
-              domain={search.domain}   setDomain={search.setDomain}
-              source={search.source}   setSource={search.setSource}
-              sortBy={search.sortBy}   setSortBy={search.setSortBy}
-              total={search.results?.total}
-            />
-            <SearchResults
-              results={search.results}
-              loading={search.loading}
-              error={search.error}
-              type={search.type}
-              page={search.page}
-              setPage={search.setPage}
-            />
-          </>
-        )}
+        {tab === "search" && <SearchPage search={search} />}
 
         {/* ── Insights ── */}
         {tab === "insights" && (

@@ -198,11 +198,121 @@ function StatBox({ label, value, color }) {
   );
 }
 
+// ── Domain view panel ──────────────────────────────────────────────────────
+
+function DomainPanel({ onRefresh }) {
+  const [domains, setDomains] = useState(null);
+  const [expanding, setExpanding] = useState(null);
+  const [expandMsg, setExpandMsg] = useState({});
+  const [open, setOpen] = useState({});
+
+  useEffect(() => {
+    fetch("/api/config/keywords/by-domain").then(r => r.json()).then(setDomains);
+  }, []);
+
+  async function handleExpand(domainTag) {
+    setExpanding(domainTag);
+    setExpandMsg(m => ({ ...m, [domainTag]: "" }));
+    try {
+      const resp = await fetch("/api/config/keywords/expand", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain_tag: domainTag, count: 8 }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setExpandMsg(m => ({ ...m, [domainTag]: `오류: ${data.detail}` }));
+      } else {
+        const msg = data.added.length > 0
+          ? `✅ ${data.added.length}개 추가: ${data.added.slice(0, 3).join(", ")}${data.added.length > 3 ? "…" : ""}`
+          : "새 키워드 없음 (모두 기존 키워드)";
+        setExpandMsg(m => ({ ...m, [domainTag]: msg }));
+        fetch("/api/config/keywords/by-domain").then(r => r.json()).then(setDomains);
+        onRefresh();
+      }
+    } catch {
+      setExpandMsg(m => ({ ...m, [domainTag]: "Ollama 연결 실패" }));
+    } finally {
+      setExpanding(null);
+    }
+  }
+
+  if (!domains) return <div style={s.emptyMsg}>로딩 중…</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {Object.entries(domains).map(([tag, domain]) => {
+        const isOpen = open[tag];
+        const activeCount = domain.keywords.filter(k => k.active === 1).length;
+        return (
+          <div key={tag} style={{ border: "1px solid #1e2330", borderRadius: 10, overflow: "hidden", background: "#0f1117" }}>
+            {/* Header */}
+            <div
+              onClick={() => setOpen(p => ({ ...p, [tag]: !p[tag] }))}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer", borderLeft: `4px solid ${domain.color}` }}
+            >
+              <div style={{ flex: 1 }}>
+                <span style={{ fontWeight: 700, color: "#f1f5f9", fontSize: 13 }}>{domain.label_ko}</span>
+                <span style={{ marginLeft: 8, fontSize: 11, color: "#64748b" }}>{domain.label}</span>
+              </div>
+              <span style={{ fontSize: 11, background: domain.color + "22", color: domain.color, padding: "2px 10px", borderRadius: 999, fontWeight: 600 }}>
+                활성 {activeCount} / 전체 {domain.keywords.length}
+              </span>
+              <span style={{ color: "#475569", fontSize: 12 }}>{isOpen ? "▲" : "▼"}</span>
+            </div>
+
+            {/* Body */}
+            {isOpen && (
+              <div style={{ padding: "12px 16px", borderTop: "1px solid #1e2330" }}>
+                {/* AI expand button */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <button
+                    onClick={() => handleExpand(tag)}
+                    disabled={expanding === tag}
+                    style={{
+                      padding: "5px 14px", fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: "pointer",
+                      background: "#8b5cf622", color: "#8b5cf6", border: "1px solid #8b5cf644",
+                    }}
+                  >
+                    {expanding === tag ? "⏳ AI 확장 중…" : "✨ AI 키워드 자동확장"}
+                  </button>
+                  {expandMsg[tag] && (
+                    <span style={{ fontSize: 12, color: expandMsg[tag].startsWith("✅") ? "#10b981" : "#f87171" }}>
+                      {expandMsg[tag]}
+                    </span>
+                  )}
+                </div>
+
+                {/* Keyword chips */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {domain.keywords.map(kw => (
+                    <span
+                      key={kw.id}
+                      style={{
+                        padding: "3px 12px", borderRadius: 999, fontSize: 12, fontWeight: 500,
+                        background: kw.active === 1 ? domain.color + "22" : "#1e2330",
+                        color:      kw.active === 1 ? domain.color        : "#475569",
+                        border: `1px solid ${kw.active === 1 ? domain.color + "55" : "#2d3748"}`,
+                      }}
+                    >
+                      {kw.keyword}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CollectionConfig() {
   const [keywords, setKeywords] = useState([]);
   const [stats,    setStats]    = useState(null);
   const [loadingStats, setLoadingStats] = useState(false);
-  const [activeSection, setActiveSection] = useState("stats");
+  const [activeSection, setActiveSection] = useState("domains");
 
   async function fetchKeywords() {
     const resp = await fetch("/api/config/keywords");
@@ -243,8 +353,9 @@ export default function CollectionConfig() {
   }
 
   const sections = [
+    { id: "domains",  label: "🗂️ 도메인별 키워드" },
     { id: "stats",    label: "📊 수집 현황" },
-    { id: "keywords", label: "🔑 키워드 관리" },
+    { id: "keywords", label: "🔑 전체 키워드 관리" },
   ];
 
   return (
@@ -252,7 +363,7 @@ export default function CollectionConfig() {
       <div style={s.header}>
         <h2 style={s.heading}>⚙️ 수집 설정</h2>
         <p style={s.desc}>
-          어떤 키워드로, 어느 출처에서, 얼마나 오래된 데이터를 수집하는지 확인하고 관리하세요
+          미래유망기술 도메인별 키워드를 확인하고, AI로 관련 키워드를 자동 확장하세요
         </p>
       </div>
 
@@ -272,6 +383,10 @@ export default function CollectionConfig() {
           </button>
         ))}
       </div>
+
+      {activeSection === "domains" && (
+        <DomainPanel onRefresh={() => { fetchKeywords(); fetchStats(); }} />
+      )}
 
       {activeSection === "stats" && (
         loadingStats

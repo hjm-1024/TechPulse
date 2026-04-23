@@ -1,13 +1,21 @@
 """
-/api/config/keywords  — CRUD for collection keywords
-/api/config/stats     — per-keyword paper/patent counts + last collected
-/api/config/domains   — list distinct domain_tags
+/api/config/keywords           — CRUD for collection keywords
+/api/config/keywords/by-domain — keywords grouped by domain (for UI)
+/api/config/keywords/expand    — Ollama-powered keyword expansion
+/api/config/stats              — per-keyword paper/patent counts + last collected
+/api/config/domains            — list distinct domain_tags
 """
+import json
+import os
+import requests as _requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from backend.config import DB_PATH
 from backend.db.schema import get_connection
-from backend.db.config_schema import get_all_keywords
+from backend.db.config_schema import get_all_keywords, get_keywords_by_domain
+
+OLLAMA_BASE   = "http://localhost:11434"
+EXPAND_MODEL  = os.getenv("OLLAMA_EXPAND_MODEL", "qwen3:14b-q8_0")
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -140,3 +148,86 @@ def list_domains():
             "SELECT DISTINCT domain_tag FROM collection_config ORDER BY domain_tag"
         ).fetchall()
     return [r["domain_tag"] for r in rows]
+
+
+# ── domain-grouped view ───────────────────────────────────────────────────────
+
+@router.get("/keywords/by-domain")
+def keywords_by_domain():
+    """키워드를 도메인별로 그룹화하여 반환. 프론트 도메인 뷰 전용."""
+    return get_keywords_by_domain(DB_PATH)
+
+
+# ── AI keyword expansion ──────────────────────────────────────────────────────
+
+class ExpandRequest(BaseModel):
+    domain_tag: str
+    count: int = 8
+
+
+@router.post("/keywords/expand")
+def expand_keywords(body: ExpandRequest):
+    """
+    Ollama LLM을 사용해 도메인에 맞는 새 키워드를 추천하고 DB에 추가.
+    기존 키워드와 중복되지 않는 것만 삽입.
+    """
+    existing = get_all_keywords(DB_PATH)
+    domain_kws = [r["keyword"] for r in existing if r["domain_tag"] == body.domain_tag]
+    all_kws    = [r["keyword"] for r in existing]
+
+    if not domain_kws:
+        raise HTTPException(400, detail=f"도메인 '{body.domain_tag}'에 기존 키워드가 없습니다.")
+
+    prompt = (
+        f"You are an expert in emerging technology research.\n"
+        f"Domain: '{body.domain_tag.replace('_', ' ')}'\n"
+        f"Existing keywords already collected: {json.dumps(domain_kws)}\n\n"
+        f"Generate {body.count} NEW English search keywords for academic papers and patents "
+        f"in this domain that are NOT already in the existing list above.\n"
+        f"Focus on specific sub-fields, techniques, materials, or systems.\n"
+        f"Return ONLY a JSON array of strings. No explanation.\n"
+        f"Example: [\"keyword one\", \"keyword two\"]"
+    )
+
+    try:
+        resp = _requests.post(
+            f"{OLLAMA_BASE}/api/generate",
+            json={"model": EXPAND_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"temperature": 0.4}},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("response", "").strip()
+    except Exception as exc:
+        raise HTTPException(503, detail=f"Ollama 연결 실패: {exc}")
+
+    # strip markdown code fences if present
+    if "```" in raw:
+        raw = raw.split("```")[1]
+        raw = raw.lstrip("json").strip()
+
+    try:
+        suggestions: list[str] = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(502, detail=f"LLM 응답 파싱 실패: {raw[:200]}")
+
+    existing_lower = {k.lower() for k in all_kws}
+    added, skipped = [], []
+
+    with get_connection(DB_PATH) as conn:
+        for kw in suggestions:
+            kw = kw.strip()
+            if not kw or kw.lower() in existing_lower:
+                skipped.append(kw)
+                continue
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO collection_config (keyword, domain_tag) VALUES (?, ?)",
+                    (kw, body.domain_tag),
+                )
+                added.append(kw)
+                existing_lower.add(kw.lower())
+            except Exception:
+                skipped.append(kw)
+
+    return {"domain_tag": body.domain_tag, "added": added, "skipped": skipped}
