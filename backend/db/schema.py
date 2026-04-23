@@ -1,3 +1,4 @@
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -65,9 +66,16 @@ def init_db(db_path: str) -> None:
     logger.info("Database initialised at %s", db_path)
 
 
-def upsert_papers(db_path: str, papers: list[dict]) -> tuple[int, int]:
-    """Insert papers; skip duplicates. Returns (inserted, skipped)."""
-    inserted = skipped = 0
+def _normalize_title(title: str) -> str:
+    """소문자 변환 + 특수문자 제거 → 중복 감지용 정규화 키."""
+    return re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
+
+
+def upsert_papers(db_path: str, papers: list[dict]) -> tuple[int, int, int]:
+    """Insert or update papers. Returns (inserted, updated, skipped).
+    On duplicate: if new citation_count is higher, UPDATE; otherwise skip.
+    """
+    inserted = updated = skipped = 0
     with get_connection(db_path) as conn:
         for p in papers:
             try:
@@ -84,6 +92,53 @@ def upsert_papers(db_path: str, papers: list[dict]) -> tuple[int, int]:
                 )
                 inserted += 1
             except sqlite3.IntegrityError:
-                skipped += 1
+                existing = conn.execute(
+                    "SELECT citation_count FROM papers WHERE doi=? OR (title=? AND source=?)",
+                    (p.get("doi"), p.get("title"), p.get("source")),
+                ).fetchone()
+                if existing and (p.get("citation_count") or 0) > (existing["citation_count"] or 0):
+                    conn.execute(
+                        "UPDATE papers SET citation_count=?, abstract=? WHERE doi=? OR (title=? AND source=?)",
+                        (p.get("citation_count"), p.get("abstract"), p.get("doi"), p.get("title"), p.get("source")),
+                    )
+                    updated += 1
+                else:
+                    skipped += 1
 
-    return inserted, skipped
+    return inserted, updated, skipped
+
+
+def dedup_papers(db_path: str, dry_run: bool = False) -> tuple[int, int]:
+    """Cross-source deduplication by normalized title.
+    Keeps the record with highest citation_count (or DOI present).
+    Returns (duplicate_groups_found, records_removed).
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute("SELECT id, title, doi, citation_count FROM papers").fetchall()
+
+    groups: dict[str, list] = {}
+    for row in rows:
+        key = _normalize_title(row["title"])
+        groups.setdefault(key, []).append(dict(row))
+
+    dup_groups = {k: v for k, v in groups.items() if len(v) > 1}
+    removed = 0
+
+    with get_connection(db_path) as conn:
+        for key, records in dup_groups.items():
+            # Sort: DOI present first, then by citation_count desc
+            records.sort(key=lambda r: (r["doi"] is not None, r["citation_count"] or 0), reverse=True)
+            keep = records[0]
+            # Update keeper's citation_count to group max
+            max_citations = max(r["citation_count"] or 0 for r in records)
+            if not dry_run:
+                conn.execute("UPDATE papers SET citation_count=? WHERE id=?", (max_citations, keep["id"]))
+            for dup in records[1:]:
+                logger.info("dedup: removing id=%d title=%s", dup["id"], dup["title"][:60])
+                if not dry_run:
+                    conn.execute("DELETE FROM papers WHERE id=?", (dup["id"],))
+                removed += 1
+
+    logger.info("dedup: %d duplicate groups, %d records %s",
+                len(dup_groups), removed, "would be removed (dry-run)" if dry_run else "removed")
+    return len(dup_groups), removed
