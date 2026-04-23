@@ -71,7 +71,7 @@ def _reconstruct_abstract(inverted_index: dict | None) -> str:
     return " ".join(word for _, word in positions)
 
 
-def _parse_work(item: dict, keyword: str) -> dict | None:
+def _parse_work(item: dict, keyword: str, domain_tag_map=None) -> dict | None:
     title = (item.get("title") or "").strip()
     if not title:
         return None
@@ -104,7 +104,7 @@ def _parse_work(item: dict, keyword: str) -> dict | None:
         "doi": doi,
         "citation_count": citation_count,
         "journal": journal,
-        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
+        "domain_tag": (domain_tag_map or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -170,7 +170,7 @@ def _fetch_all_pages(
 
         for item in items:
             paper = _parse_work(
-                item, _keyword_from_filter(filter_str)
+                item, _keyword_from_filter(filter_str), domain_tag_map=domain_tag_map
             )
             if paper is None:
                 continue
@@ -207,7 +207,6 @@ def fetch_papers(
     """Yield deduplicated paper dicts for each keyword (two filter passes each)."""
     if keywords is None:
         keywords = KEYWORDS
-    _dtmap = domain_tag_map
 
     session = _make_session()
 

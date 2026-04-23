@@ -47,7 +47,7 @@ def _build_params(keyword: str, page: int, days_back: int) -> dict:
     }
 
 
-def _parse_item(item: ET.Element, keyword: str) -> dict | None:
+def _parse_item(item: ET.Element, keyword: str, domain_tag_map=None) -> dict | None:
     def _text(tag: str) -> str:
         el = item.find(tag)
         return el.text.strip() if el is not None and el.text else ""
@@ -76,7 +76,7 @@ def _parse_item(item: ET.Element, keyword: str) -> dict | None:
         "ipc_codes": ipc_codes,
         "source": "kipris",
         "country": "KR",
-        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
+        "domain_tag": (domain_tag_map or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -132,7 +132,6 @@ def fetch_patents(
     domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield Korean patent dicts. Skipped entirely if KIPRIS_API_KEY is not set."""
-    _dtmap = domain_tag_map
     if not KIPRIS_API_KEY:
         logger.warning(
             "KIPRIS_API_KEY not set in .env — skipping KIPRIS collection. "
@@ -163,7 +162,7 @@ def fetch_patents(
                 break
 
             for item in items:
-                patent = _parse_item(item, keyword)
+                patent = _parse_item(item, keyword, domain_tag_map=domain_tag_map)
                 if patent and patent["patent_number"]:
                     yield patent
                     fetched += 1

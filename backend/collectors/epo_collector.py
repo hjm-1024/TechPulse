@@ -78,7 +78,7 @@ def _text(el: ET.Element | None) -> str:
     return (el.text or "").strip() if el is not None else ""
 
 
-def _parse_document(doc: ET.Element, keyword: str) -> dict | None:
+def _parse_document(doc: ET.Element, keyword: str, domain_tag_map=None) -> dict | None:
     biblio = doc.find("epo:bibliographic-data", _NS)
     if biblio is None:
         return None
@@ -171,7 +171,7 @@ def _parse_document(doc: ET.Element, keyword: str) -> dict | None:
         "ipc_codes": ipc_codes,
         "source": "epo",
         "country": country or "WO",
-        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
+        "domain_tag": (domain_tag_map or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -259,7 +259,6 @@ def fetch_patents(
     domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield worldwide patent dicts. Skips if EPO_OPS_KEY/SECRET not set."""
-    _dtmap = domain_tag_map
     if not EPO_OPS_KEY or not EPO_OPS_SECRET:
         logger.warning(
             "EPO_OPS_KEY or EPO_OPS_SECRET not set in .env — skipping EPO collection. "
@@ -300,7 +299,7 @@ def fetch_patents(
                 break
 
             for doc in docs:
-                patent = _parse_document(doc, keyword)
+                patent = _parse_document(doc, keyword, domain_tag_map=domain_tag_map)
                 if patent:
                     yield patent
                     fetched += 1

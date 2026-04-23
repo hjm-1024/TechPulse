@@ -132,15 +132,19 @@ DOMAIN_META: dict[str, dict] = {
 def init_collection_config(db_path: str) -> None:
     with get_connection(db_path) as conn:
         conn.execute(CREATE_CONFIG_TABLE)
-        count = conn.execute("SELECT COUNT(*) FROM collection_config").fetchone()[0]
-        if count == 0:
-            conn.executemany(
+        # INSERT OR IGNORE: 새 키워드는 추가, 기존 키워드는 건너뜀
+        inserted = 0
+        for kw, tag in _DEFAULT_KEYWORDS:
+            cur = conn.execute(
                 "INSERT OR IGNORE INTO collection_config (keyword, domain_tag, days_back) VALUES (?, ?, ?)",
-                [(kw, tag, _DAYS_SINCE_2020) for kw, tag in _DEFAULT_KEYWORDS],
+                (kw, tag, _DAYS_SINCE_2020),
             )
-            logger.info("collection_config: seeded %d default keywords (from 2020)", len(_DEFAULT_KEYWORDS))
+            inserted += cur.rowcount
+        total = conn.execute("SELECT COUNT(*) FROM collection_config").fetchone()[0]
+        if inserted:
+            logger.info("collection_config: added %d new keywords, total=%d", inserted, total)
         else:
-            logger.info("collection_config: %d keywords loaded", count)
+            logger.info("collection_config: %d keywords loaded (no new)", total)
 
 
 def get_active_keywords(db_path: str) -> list[dict]:

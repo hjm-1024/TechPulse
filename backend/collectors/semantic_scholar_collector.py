@@ -33,7 +33,7 @@ def _make_session() -> requests.Session:
     return session
 
 
-def _parse_paper(item: dict, keyword: str) -> dict | None:
+def _parse_paper(item: dict, keyword: str, domain_tag_map=None) -> dict | None:
     title = (item.get("title") or "").strip()
     if not title:
         return None
@@ -66,7 +66,7 @@ def _parse_paper(item: dict, keyword: str) -> dict | None:
         "doi": doi,
         "citation_count": citation_count,
         "journal": journal,
-        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
+        "domain_tag": (domain_tag_map or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -122,7 +122,6 @@ def fetch_papers(
     """Yield paper dicts for each keyword, respecting the 1 req/s rate limit."""
     if keywords is None:
         keywords = KEYWORDS
-    _dtmap = domain_tag_map
 
     session = _make_session()
 
@@ -146,7 +145,7 @@ def fetch_papers(
                 break
 
             for item in items:
-                paper = _parse_paper(item, keyword)
+                paper = _parse_paper(item, keyword, domain_tag_map=domain_tag_map)
                 if paper:
                     yield paper
                     fetched += 1

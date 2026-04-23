@@ -66,7 +66,7 @@ def _build_payload(keyword: str, days_back: int, offset: int) -> dict:
     }
 
 
-def _parse_hit(hit: dict, keyword: str) -> dict | None:
+def _parse_hit(hit: dict, keyword: str, domain_tag_map=None) -> dict | None:
     title = (hit.get("title") or "").strip()
     if not title:
         return None
@@ -116,7 +116,7 @@ def _parse_hit(hit: dict, keyword: str) -> dict | None:
         "ipc_codes": ipc_codes,
         "source": "lens",
         "country": jurisdiction,
-        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
+        "domain_tag": (domain_tag_map or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -161,7 +161,6 @@ def fetch_patents(
     domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield worldwide patent dicts. Skips if LENS_API_KEY not set."""
-    _dtmap = domain_tag_map
     if not LENS_API_KEY:
         logger.warning(
             "LENS_API_KEY not set — skipping Lens collection. "
@@ -197,7 +196,7 @@ def fetch_patents(
                 break
 
             for hit in hits:
-                patent = _parse_hit(hit, keyword)
+                patent = _parse_hit(hit, keyword, domain_tag_map=domain_tag_map)
                 if patent:
                     yield patent
                     fetched += 1

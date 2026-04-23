@@ -32,7 +32,7 @@ def _build_query(keyword: str, days_back: int = 90) -> str:
     return f'(ti:"{keyword}" OR abs:"{keyword}") AND submittedDate:[{since} TO 99991231235959]'
 
 
-def _parse_entry(entry: ET.Element, keyword: str) -> dict | None:
+def _parse_entry(entry: ET.Element, keyword: str, domain_tag_map=None) -> dict | None:
     def _text(tag: str) -> str:
         el = entry.find(tag, _NS)
         return el.text.strip() if el is not None and el.text else ""
@@ -72,7 +72,7 @@ def _parse_entry(entry: ET.Element, keyword: str) -> dict | None:
         "doi": doi or None,
         "citation_count": 0,
         "journal": journal,
-        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
+        "domain_tag": (domain_tag_map or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -103,7 +103,6 @@ def fetch_papers(
     """Yield paper dicts for each keyword, respecting arXiv rate limits."""
     if keywords is None:
         keywords = KEYWORDS
-    _dtmap = domain_tag_map
 
     session = requests.Session()
     session.headers.update({"User-Agent": "TechPulse/1.0 (research dashboard)"})
@@ -129,7 +128,7 @@ def fetch_papers(
                 break
 
             for entry in entries:
-                paper = _parse_entry(entry, keyword)
+                paper = _parse_entry(entry, keyword, domain_tag_map=domain_tag_map)
                 if paper:
                     yield paper
                     fetched += 1
