@@ -1,19 +1,23 @@
 """
 Entry point: run enabled collectors and persist results to SQLite.
 
+Keywords and domain tags are loaded from the collection_config DB table.
+All data is collected from 2020-01-01 onwards (days_back per keyword in DB).
+
 Usage:
-    python run_collectors.py                                    # all papers, 90 days
+    python run_collectors.py                          # all papers, DB keywords
     python run_collectors.py --type papers --source arxiv
-    python run_collectors.py --type patents                     # all patent sources
-    python run_collectors.py --type patents --source epo --days 1825
-    python run_collectors.py --type all                         # papers + patents
+    python run_collectors.py --type patents           # all patent sources
+    python run_collectors.py --type all               # papers + patents
+    python run_collectors.py --type all --reset       # wipe DB first, then collect
 """
 
 import argparse
 
-from backend.config import DB_PATH, KEYWORDS
+from backend.config import DB_PATH
 from backend.db.schema import init_db, upsert_papers, dedup_papers
 from backend.db.patents_schema import init_patents_db, upsert_patents
+from backend.db.config_schema import init_collection_config, get_active_keywords
 from backend.collectors.arxiv_collector import fetch_papers as arxiv_fetch
 from backend.collectors.semantic_scholar_collector import fetch_papers as ss_fetch
 from backend.collectors.openalex_collector import fetch_papers as openalex_fetch
@@ -24,6 +28,19 @@ from backend.collectors.kipris_collector import fetch_patents as kipris_fetch
 from backend.utils.logger import get_logger
 
 logger = get_logger("run_collectors")
+
+
+def _load_keywords_from_db() -> tuple[list[str], dict[str, str]]:
+    """DB collection_config에서 활성 키워드와 domain_tag_map 로드."""
+    rows = get_active_keywords(DB_PATH)
+    if not rows:
+        logger.warning("collection_config가 비어 있습니다. 기본값으로 시드합니다.")
+        init_collection_config(DB_PATH)
+        rows = get_active_keywords(DB_PATH)
+    keywords = [r["keyword"] for r in rows]
+    domain_tag_map = {r["keyword"]: r["domain_tag"] for r in rows}
+    logger.info("키워드 %d개 로드 (도메인 %d개)", len(keywords), len(set(domain_tag_map.values())))
+    return keywords, domain_tag_map
 
 _PAPER_SOURCES = {
     "arxiv": arxiv_fetch,
@@ -39,11 +56,12 @@ _PATENT_SOURCES = {
 
 
 def _run_papers(source: str, days_back: int) -> None:
+    keywords, domain_tag_map = _load_keywords_from_db()
     targets = _PAPER_SOURCES if source == "all" else {source: _PAPER_SOURCES[source]}
     for name, fetch_fn in targets.items():
-        logger.info("=== Papers: %s (days_back=%d) ===", name, days_back)
+        logger.info("=== Papers: %s (days_back=%d, keywords=%d) ===", name, days_back, len(keywords))
         try:
-            papers = list(fetch_fn(keywords=KEYWORDS, days_back=days_back))
+            papers = list(fetch_fn(keywords=keywords, days_back=days_back, domain_tag_map=domain_tag_map))
             inserted, updated, skipped = upsert_papers(DB_PATH, papers)
             logger.info("%s done | inserted=%d updated=%d skipped=%d", name, inserted, updated, skipped)
         except Exception as exc:
@@ -51,11 +69,12 @@ def _run_papers(source: str, days_back: int) -> None:
 
 
 def _run_patents(source: str, days_back: int) -> None:
+    keywords, domain_tag_map = _load_keywords_from_db()
     targets = _PATENT_SOURCES if source == "all" else {source: _PATENT_SOURCES[source]}
     for name, fetch_fn in targets.items():
-        logger.info("=== Patents: %s (days_back=%d) ===", name, days_back)
+        logger.info("=== Patents: %s (days_back=%d, keywords=%d) ===", name, days_back, len(keywords))
         try:
-            patents = list(fetch_fn(keywords=KEYWORDS, days_back=days_back))
+            patents = list(fetch_fn(keywords=keywords, days_back=days_back, domain_tag_map=domain_tag_map))
             inserted, skipped = upsert_patents(DB_PATH, patents)
             logger.info("%s done | inserted=%d skipped=%d", name, inserted, skipped)
         except Exception as exc:
@@ -117,11 +136,24 @@ def _run_clean_names() -> None:
     logger.info("clean-names: updated %d / %d patent records", updated, len(rows))
 
 
+def _reset_data() -> None:
+    """논문·특허 데이터만 삭제. collection_config(키워드 설정)은 유지."""
+    from backend.db.schema import get_connection
+    with get_connection(DB_PATH) as conn:
+        conn.execute("DELETE FROM papers")
+        conn.execute("DELETE FROM patents")
+    logger.info("기존 papers/patents 데이터 삭제 완료. 키워드 설정은 유지됨.")
+
+
 def run(data_type: str, source: str, days_back: int, enrich: bool = False,
-        embed: bool = False, clean_names: bool = False, **kwargs) -> None:
+        embed: bool = False, clean_names: bool = False, reset: bool = False, **kwargs) -> None:
     init_db(DB_PATH)
     init_patents_db(DB_PATH)
     migrate_add_embeddings(DB_PATH)
+    init_collection_config(DB_PATH)
+
+    if reset:
+        _reset_data()
 
     if enrich:
         logger.info("=== EPO party enrichment ===")
@@ -173,8 +205,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--days",
         type=int,
-        default=90,
-        help="Days of history to fetch (default: 90)",
+        default=2300,
+        help="Days of history to fetch (default: 2300 ≈ from 2020-01-01)",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete existing papers/patents before collecting (keyword config is preserved)",
     )
     parser.add_argument(
         "--enrich",
@@ -206,4 +243,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     run(data_type=args.type, source=args.source, days_back=args.days,
         enrich=args.enrich, embed=args.embed, clean_names=args.clean_names,
-        dedup=args.dedup, dry_run=args.dry_run)
+        dedup=args.dedup, dry_run=args.dry_run, reset=args.reset)

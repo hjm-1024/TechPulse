@@ -104,7 +104,7 @@ def _parse_work(item: dict, keyword: str) -> dict | None:
         "doi": doi,
         "citation_count": citation_count,
         "journal": journal,
-        "domain_tag": DOMAIN_TAG_MAP.get(keyword, "other"),
+        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -202,10 +202,12 @@ def fetch_papers(
     keywords: list[str] | None = None,
     days_back: int = 90,      # accepted for interface parity; not used in OA filter
     max_per_keyword: int = 500,
+    domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield deduplicated paper dicts for each keyword (two filter passes each)."""
     if keywords is None:
         keywords = KEYWORDS
+    _dtmap = domain_tag_map
 
     session = _make_session()
 

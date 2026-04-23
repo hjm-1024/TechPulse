@@ -72,7 +72,7 @@ def _parse_entry(entry: ET.Element, keyword: str) -> dict | None:
         "doi": doi or None,
         "citation_count": 0,
         "journal": journal,
-        "domain_tag": DOMAIN_TAG_MAP.get(keyword, "other"),
+        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -98,10 +98,12 @@ def fetch_papers(
     keywords: list[str] | None = None,
     days_back: int = 90,
     max_per_keyword: int = 500,
+    domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield paper dicts for each keyword, respecting arXiv rate limits."""
     if keywords is None:
         keywords = KEYWORDS
+    _dtmap = domain_tag_map
 
     session = requests.Session()
     session.headers.update({"User-Agent": "TechPulse/1.0 (research dashboard)"})

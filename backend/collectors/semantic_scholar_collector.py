@@ -66,7 +66,7 @@ def _parse_paper(item: dict, keyword: str) -> dict | None:
         "doi": doi,
         "citation_count": citation_count,
         "journal": journal,
-        "domain_tag": DOMAIN_TAG_MAP.get(keyword, "other"),
+        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -117,10 +117,12 @@ def fetch_papers(
     keywords: list[str] | None = None,
     days_back: int = 90,          # accepted for interface parity; SS doesn't filter by date natively
     max_per_keyword: int = 500,
+    domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield paper dicts for each keyword, respecting the 1 req/s rate limit."""
     if keywords is None:
         keywords = KEYWORDS
+    _dtmap = domain_tag_map
 
     session = _make_session()
 

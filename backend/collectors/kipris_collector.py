@@ -76,7 +76,7 @@ def _parse_item(item: ET.Element, keyword: str) -> dict | None:
         "ipc_codes": ipc_codes,
         "source": "kipris",
         "country": "KR",
-        "domain_tag": DOMAIN_TAG_MAP.get(keyword, "other"),
+        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -129,8 +129,10 @@ def fetch_patents(
     keywords: list[str] | None = None,
     days_back: int = 365,
     max_per_keyword: int = 500,
+    domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield Korean patent dicts. Skipped entirely if KIPRIS_API_KEY is not set."""
+    _dtmap = domain_tag_map
     if not KIPRIS_API_KEY:
         logger.warning(
             "KIPRIS_API_KEY not set in .env — skipping KIPRIS collection. "

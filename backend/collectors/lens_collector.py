@@ -116,7 +116,7 @@ def _parse_hit(hit: dict, keyword: str) -> dict | None:
         "ipc_codes": ipc_codes,
         "source": "lens",
         "country": jurisdiction,
-        "domain_tag": DOMAIN_TAG_MAP.get(keyword, "other"),
+        "domain_tag": (_dtmap or DOMAIN_TAG_MAP).get(keyword, "other"),
     }
 
 
@@ -158,8 +158,10 @@ def fetch_patents(
     keywords: list[str] | None = None,
     days_back: int = 365,
     max_per_keyword: int = 500,
+    domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Yield worldwide patent dicts. Skips if LENS_API_KEY not set."""
+    _dtmap = domain_tag_map
     if not LENS_API_KEY:
         logger.warning(
             "LENS_API_KEY not set — skipping Lens collection. "
