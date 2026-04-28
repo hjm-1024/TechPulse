@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
+import { DOMAIN_META, domainColor } from "../constants/domains";
 
-const DOMAIN_COLOR = {
-  physical_ai_robotics: "#10b981",
-  telecom_6g: "#f59e0b",
-};
 const DEFAULT_COLOR = "#60a5fa";
 
 function nodeColor(d) {
-  return DOMAIN_COLOR[d.domain_tag] ?? DEFAULT_COLOR;
+  return domainColor(d.domain_tag);
 }
 
 function nodeRadius(d) {
@@ -174,15 +171,12 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
       </div>
 
       <div style={s.legend}>
-        {Object.entries(DOMAIN_COLOR).map(([tag, color]) => (
+        {Object.entries(DOMAIN_META).map(([tag, m]) => (
           <span key={tag} style={s.legendItem}>
-            <span style={{ ...s.legendDot, background: color }} />
-            {tag.replace(/_/g, " ")}
+            <span style={{ ...s.legendDot, background: m.color }} />
+            {m.label_ko}
           </span>
         ))}
-        <span style={s.legendItem}>
-          <span style={{ ...s.legendDot, background: DEFAULT_COLOR }} />기타
-        </span>
         <span style={{ ...s.legendItem, color: "#475569", marginLeft: 16 }}>
           원 크기 = 인용수 · 선 굵기 = 유사도
         </span>

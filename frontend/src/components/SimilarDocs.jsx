@@ -1,7 +1,6 @@
 import { useState } from "react";
 
-const DOMAIN_COLOR = { physical_ai_robotics: "#10b981", telecom_6g: "#f59e0b" };
-const DOMAIN_LABEL = { physical_ai_robotics: "Robotics", telecom_6g: "6G" };
+import { domainColor, domainLabel } from "../constants/domains";
 const SOURCE_COLOR = {
   arxiv: "#f97316", semantic_scholar: "#8b5cf6", openalex: "#06b6d4",
   epo: "#ef4444", kipris: "#3b82f6",
@@ -78,8 +77,8 @@ function SimilarItem({ doc, type }) {
   const year     = (isPaper ? doc.published_date : doc.publication_date)?.slice(0, 4) ?? "";
   const src      = doc.source ?? "";
   const srcColor = SOURCE_COLOR[src] ?? "#64748b";
-  const domColor = DOMAIN_COLOR[doc.domain_tag] ?? "#475569";
-  const domLabel = DOMAIN_LABEL[doc.domain_tag] ?? doc.domain_tag ?? "";
+  const domColor = domainColor(doc.domain_tag);
+  const domLbl   = domainLabel(doc.domain_tag);
   const score    = doc.similarity != null ? `${Math.round(doc.similarity * 100)}%` : "";
   const href     = isPaper && doc.doi ? `https://doi.org/${doc.doi}` : null;
 
@@ -92,9 +91,9 @@ function SimilarItem({ doc, type }) {
             <span style={{ ...s.badge, background: srcColor + "22", color: srcColor }}>
               {src.replace(/_/g, " ")}
             </span>
-            {domLabel && (
+            {domLbl && (
               <span style={{ ...s.badge, background: domColor + "22", color: domColor }}>
-                {domLabel}
+                {domLbl}
               </span>
             )}
             {!isPaper && doc.country && (

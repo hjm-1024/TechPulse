@@ -1,9 +1,13 @@
+import { DOMAIN_META } from "../constants/domains";
+
 const PAPER_SOURCES  = ["arxiv", "semantic_scholar", "openalex"];
-const PATENT_SOURCES = ["epo", "kipris"];
+const PATENT_SOURCES = ["epo", "kipris", "lens"];
 const DOMAINS = [
   { value: "", label: "All Domains" },
-  { value: "physical_ai_robotics", label: "Physical AI & Robotics" },
-  { value: "telecom_6g", label: "Telecom & 6G" },
+  ...Object.entries(DOMAIN_META).map(([tag, m]) => ({
+    value: tag,
+    label: `${m.label_ko}  ${m.label}`,
+  })),
 ];
 const SORT_OPTIONS = [
   { value: "citation_count", label: "Citations" },

@@ -1,8 +1,7 @@
 import { useState, useRef } from "react";
 import SimilarDocs from "./SimilarDocs";
 
-const DOMAIN_COLOR  = { physical_ai_robotics: "#10b981", telecom_6g: "#f59e0b" };
-const DOMAIN_LABEL  = { physical_ai_robotics: "Robotics", telecom_6g: "6G" };
+import { domainColor, domainLabel } from "../constants/domains";
 const SOURCE_COLOR  = {
   arxiv: "#f97316", semantic_scholar: "#8b5cf6", openalex: "#06b6d4",
   epo: "#ef4444", kipris: "#3b82f6",
@@ -57,15 +56,15 @@ export default function SearchResults({ results, loading, error, type, page, set
 
 function PaperCard({ paper }) {
   const [open, setOpen] = useState(false);
-  const domainColor = DOMAIN_COLOR[paper.domain_tag] ?? "#64748b";
-  const srcColor    = SOURCE_COLOR[paper.source] ?? "#94a3b8";
+  const dColor   = domainColor(paper.domain_tag);
+  const srcColor = SOURCE_COLOR[paper.source] ?? "#94a3b8";
 
   return (
     <div style={s.card}>
       <div style={s.cardTop}>
         <div style={s.badges}>
           <Badge color={srcColor}>{paper.source?.replace(/_/g, " ")}</Badge>
-          <Badge color={domainColor}>{DOMAIN_LABEL[paper.domain_tag] ?? paper.domain_tag}</Badge>
+          <Badge color={dColor}>{domainLabel(paper.domain_tag)}</Badge>
           {paper.citation_count > 0 && (
             <span style={s.citations}>↑ {paper.citation_count.toLocaleString()}</span>
           )}
@@ -114,7 +113,7 @@ function PaperCard({ paper }) {
 
 function PatentCard({ patent }) {
   const [open, setOpen] = useState(false);
-  const domainColor = DOMAIN_COLOR[patent.domain_tag] ?? "#64748b";
+  const dColor = domainColor(patent.domain_tag);
   const srcColor    = SOURCE_COLOR[patent.source] ?? "#94a3b8";
   const kind        = extractKind(patent.patent_number);
   const kindLabel   = kind ? KIND_LABEL[kind] : null;
@@ -126,7 +125,7 @@ function PatentCard({ patent }) {
       <div style={s.cardTop}>
         <div style={s.badges}>
           <Badge color={srcColor}>{patent.source?.toUpperCase()}</Badge>
-          <Badge color={domainColor}>{DOMAIN_LABEL[patent.domain_tag] ?? patent.domain_tag}</Badge>
+          <Badge color={dColor}>{domainLabel(patent.domain_tag)}</Badge>
           {countryName && <Badge color="#64748b">{countryName}</Badge>}
           {kindLabel && (
             <Badge color={kind?.startsWith("B") ? "#10b981" : "#94a3b8"}>

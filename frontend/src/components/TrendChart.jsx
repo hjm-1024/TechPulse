@@ -2,21 +2,13 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-
-const COLORS = {
-  physical_ai_robotics: "#10b981",
-  telecom_6g: "#f59e0b",
-};
-
-const LABELS = {
-  physical_ai_robotics: "Physical AI & Robotics",
-  telecom_6g: "Telecom & 6G",
-};
+import { domainColor, domainLabel } from "../constants/domains";
 
 export default function TrendChart({ data }) {
   if (!data || data.length === 0) return <Empty />;
 
-  const domains = Object.keys(COLORS);
+  // Derive domain keys from data (all keys except "month")
+  const domains = [...new Set(data.flatMap(d => Object.keys(d).filter(k => k !== "month")))];
 
   return (
     <div style={styles.card}>
@@ -41,15 +33,15 @@ export default function TrendChart({ data }) {
             itemStyle={{ color: "#cbd5e1" }}
           />
           <Legend
-            formatter={(value) => LABELS[value] ?? value}
-            wrapperStyle={{ color: "#94a3b8", fontSize: 12 }}
+            formatter={(value) => domainLabel(value)}
+            wrapperStyle={{ color: "#94a3b8", fontSize: 11 }}
           />
           {domains.map((d) => (
             <Line
               key={d}
               type="monotone"
               dataKey={d}
-              stroke={COLORS[d]}
+              stroke={domainColor(d)}
               strokeWidth={2}
               dot={false}
               activeDot={{ r: 4 }}

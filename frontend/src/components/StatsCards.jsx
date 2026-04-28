@@ -1,23 +1,26 @@
-const DOMAIN_LABEL = {
-  physical_ai_robotics: "Physical AI & Robotics",
-  telecom_6g: "Telecom & 6G",
-};
+import { domainLabel, domainColor } from "../constants/domains";
 
 const SOURCE_COLOR = {
-  arxiv: "#f97316",
+  arxiv:            "#f97316",
   semantic_scholar: "#8b5cf6",
-  openalex: "#06b6d4",
+  openalex:         "#06b6d4",
+};
+
+const SOURCE_LABEL = {
+  arxiv:            "Arxiv",
+  semantic_scholar: "Semantic Scholar",
+  openalex:         "OpenAlex",
 };
 
 export default function StatsCards({ data }) {
   if (!data) return null;
 
   const cards = [
-    { label: "Total Papers", value: data.total.toLocaleString(), accent: "#3b82f6" },
+    { label: "TOTAL PAPERS", value: data.total.toLocaleString(), accent: "#3b82f6" },
     ...Object.entries(data.by_domain).map(([k, v]) => ({
-      label: DOMAIN_LABEL[k] ?? k,
+      label: domainLabel(k),
       value: v.toLocaleString(),
-      accent: k === "physical_ai_robotics" ? "#10b981" : "#f59e0b",
+      accent: domainColor(k),
     })),
   ];
 
@@ -36,7 +39,7 @@ export default function StatsCards({ data }) {
           {Object.entries(data.by_source).map(([src, count]) => (
             <div key={src} style={styles.sourceChip}>
               <span style={{ ...styles.dot, background: SOURCE_COLOR[src] ?? "#94a3b8" }} />
-              <span style={styles.srcName}>{src.replace("_", " ")}</span>
+              <span style={styles.srcName}>{SOURCE_LABEL[src] ?? src}</span>
               <span style={styles.srcCount}>{count.toLocaleString()}</span>
             </div>
           ))}
@@ -58,11 +61,11 @@ const styles = {
     borderRadius: 12,
     padding: "20px 24px",
   },
-  label: { fontSize: 12, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
+  label: { fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 },
   value: { fontSize: 32, fontWeight: 700 },
   sourceRow: { display: "flex", gap: 24, flexWrap: "wrap", marginTop: 12 },
   sourceChip: { display: "flex", alignItems: "center", gap: 8 },
   dot: { width: 10, height: 10, borderRadius: "50%", display: "inline-block" },
-  srcName: { fontSize: 13, color: "#cbd5e1", textTransform: "capitalize" },
+  srcName: { fontSize: 13, color: "#cbd5e1" },
   srcCount: { fontSize: 13, fontWeight: 600, color: "#e2e8f0" },
 };

@@ -1,9 +1,5 @@
 import { useState } from "react";
-
-const DOMAIN_COLOR = {
-  physical_ai_robotics: "#10b981",
-  telecom_6g: "#f59e0b",
-};
+import { DOMAIN_META, domainColor } from "../constants/domains";
 
 function ScoreBadge({ score }) {
   const pct = Math.min(100, Math.round(score * 500));
@@ -16,7 +12,7 @@ function ScoreBadge({ score }) {
 }
 
 function DomainDot({ tag }) {
-  const color = DOMAIN_COLOR[tag] ?? "#60a5fa";
+  const color = domainColor(tag);
   return (
     <span style={{ ...s.domainBadge, background: color + "22", color }}>
       {tag?.replace(/_/g, " ") ?? "기타"}
@@ -99,8 +95,9 @@ export default function EmergingPapers() {
           <span style={s.label}>도메인</span>
           <select value={domain} onChange={e => setDomain(e.target.value)} style={s.sel}>
             <option value="">전체</option>
-            <option value="physical_ai_robotics">Physical AI & Robotics</option>
-            <option value="telecom_6g">Telecom & 6G</option>
+            {Object.entries(DOMAIN_META).map(([tag, m]) => (
+              <option key={tag} value={tag}>{m.label_ko}  {m.label}</option>
+            ))}
           </select>
         </div>
 

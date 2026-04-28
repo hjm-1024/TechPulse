@@ -1,13 +1,18 @@
-const DOMAIN_COLOR = {
-  physical_ai_robotics: "#10b981",
-  telecom_6g: "#f59e0b",
-};
+import { DOMAIN_META, domainColor, domainLabel } from "../constants/domains";
 
 const SOURCE_COLOR = {
-  arxiv: "#f97316",
+  arxiv:            "#f97316",
   semantic_scholar: "#8b5cf6",
-  openalex: "#06b6d4",
+  openalex:         "#06b6d4",
 };
+
+const DOMAIN_OPTIONS = [
+  { value: null, label: "All" },
+  ...Object.entries(DOMAIN_META).map(([tag, m]) => ({
+    value: tag,
+    label: m.label_ko,
+  })),
+];
 
 export default function TopPapers({ data, domain, onDomainChange }) {
   if (!data) return null;
@@ -16,21 +21,15 @@ export default function TopPapers({ data, domain, onDomainChange }) {
     <div style={styles.card}>
       <div style={styles.header}>
         <h2 style={styles.title}>Top Cited Papers</h2>
-        <div style={styles.tabs}>
-          {[null, "physical_ai_robotics", "telecom_6g"].map((d) => (
-            <button
-              key={String(d)}
-              onClick={() => onDomainChange(d)}
-              style={{
-                ...styles.tab,
-                background: domain === d ? "#3b82f6" : "#2d3748",
-                color: domain === d ? "#fff" : "#94a3b8",
-              }}
-            >
-              {d === null ? "All" : d === "physical_ai_robotics" ? "Robotics" : "6G"}
-            </button>
+        <select
+          value={domain ?? ""}
+          onChange={e => onDomainChange(e.target.value || null)}
+          style={styles.domainSel}
+        >
+          {DOMAIN_OPTIONS.map(o => (
+            <option key={String(o.value)} value={o.value ?? ""}>{o.label}</option>
           ))}
-        </div>
+        </select>
       </div>
 
       <div style={styles.tableWrap}>
@@ -43,34 +42,37 @@ export default function TopPapers({ data, domain, onDomainChange }) {
             </tr>
           </thead>
           <tbody>
-            {data.map((p, i) => (
-              <tr key={i} style={styles.tr}>
-                <td style={{ ...styles.td, maxWidth: 340 }}>
-                  {p.doi
-                    ? <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" style={styles.link}>{p.title}</a>
-                    : <span>{p.title}</span>
-                  }
-                </td>
-                <td style={{ ...styles.td, color: "#94a3b8", maxWidth: 200 }}>
-                  {(p.authors || "").split(", ").slice(0, 2).join(", ")}
-                  {(p.authors || "").split(", ").length > 2 ? " et al." : ""}
-                </td>
-                <td style={styles.td}>{(p.published_date || "").slice(0, 4)}</td>
-                <td style={styles.td}>
-                  <span style={{ ...styles.badge, background: SOURCE_COLOR[p.source] + "22", color: SOURCE_COLOR[p.source] }}>
-                    {p.source?.replace("_", " ")}
-                  </span>
-                </td>
-                <td style={styles.td}>
-                  <span style={{ ...styles.badge, background: (DOMAIN_COLOR[p.domain_tag] ?? "#64748b") + "22", color: DOMAIN_COLOR[p.domain_tag] ?? "#64748b" }}>
-                    {p.domain_tag === "physical_ai_robotics" ? "Robotics" : "6G"}
-                  </span>
-                </td>
-                <td style={{ ...styles.td, textAlign: "right", fontWeight: 600, color: "#f1f5f9" }}>
-                  {(p.citation_count || 0).toLocaleString()}
-                </td>
-              </tr>
-            ))}
+            {data.map((p, i) => {
+              const dc = domainColor(p.domain_tag);
+              return (
+                <tr key={i} style={styles.tr}>
+                  <td style={{ ...styles.td, maxWidth: 340 }}>
+                    {p.doi
+                      ? <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" style={styles.link}>{p.title}</a>
+                      : <span>{p.title}</span>
+                    }
+                  </td>
+                  <td style={{ ...styles.td, color: "#94a3b8", maxWidth: 200 }}>
+                    {(p.authors || "").split(", ").slice(0, 2).join(", ")}
+                    {(p.authors || "").split(", ").length > 2 ? " et al." : ""}
+                  </td>
+                  <td style={styles.td}>{(p.published_date || "").slice(0, 4)}</td>
+                  <td style={styles.td}>
+                    <span style={{ ...styles.badge, background: (SOURCE_COLOR[p.source] ?? "#94a3b8") + "22", color: SOURCE_COLOR[p.source] ?? "#94a3b8" }}>
+                      {p.source?.replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  <td style={styles.td}>
+                    <span style={{ ...styles.badge, background: dc + "22", color: dc }}>
+                      {domainLabel(p.domain_tag)}
+                    </span>
+                  </td>
+                  <td style={{ ...styles.td, textAlign: "right", fontWeight: 600, color: "#f1f5f9" }}>
+                    {(p.citation_count || 0).toLocaleString()}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -82,8 +84,10 @@ const styles = {
   card: { background: "#1e2330", borderRadius: 12, padding: "24px 28px", marginBottom: 24 },
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   title: { fontSize: 16, fontWeight: 600, color: "#e2e8f0" },
-  tabs: { display: "flex", gap: 8 },
-  tab: { padding: "5px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 500, transition: "all 0.15s" },
+  domainSel: {
+    background: "#131720", border: "1px solid #2d3748", borderRadius: 8,
+    color: "#cbd5e1", padding: "6px 12px", fontSize: 12, cursor: "pointer", outline: "none",
+  },
   tableWrap: { overflowX: "auto" },
   table: { width: "100%", borderCollapse: "collapse" },
   th: { textAlign: "left", padding: "8px 12px", fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #2d3748" },

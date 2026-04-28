@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import SearchResults from "./SearchResults";
+import { DOMAIN_META } from "../constants/domains";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const DOMAINS = [
-  { value: "",                    label: "전체 도메인" },
-  { value: "physical_ai_robotics", label: "Physical AI & Robotics" },
-  { value: "telecom_6g",           label: "Telecom & 6G" },
+  { value: "", label: "전체 도메인" },
+  ...Object.entries(DOMAIN_META).map(([tag, m]) => ({
+    value: tag,
+    label: `${m.label_ko}  ${m.label}`,
+  })),
 ];
 
 const PAPER_SOURCES  = ["arxiv", "semantic_scholar", "openalex"];

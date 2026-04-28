@@ -9,10 +9,7 @@ const SOURCE_COLOR = {
   openalex: "#06b6d4",
 };
 
-const DOMAIN_LABEL = {
-  physical_ai_robotics: "Physical AI & Robotics",
-  telecom_6g: "Telecom & 6G",
-};
+import { domainLabel as getDomainLabel } from "../constants/domains";
 
 export default function SourceChart({ data }) {
   if (!data || data.length === 0) return null;
@@ -21,7 +18,7 @@ export default function SourceChart({ data }) {
   const pivot = {};
   const sources = new Set();
   for (const row of data) {
-    const domain = DOMAIN_LABEL[row.domain_tag] ?? row.domain_tag;
+    const domain = getDomainLabel(row.domain_tag);
     pivot[domain] = pivot[domain] ?? { domain };
     pivot[domain][row.source] = row.count;
     sources.add(row.source);

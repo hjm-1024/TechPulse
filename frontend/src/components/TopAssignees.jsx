@@ -1,5 +1,4 @@
-const DOMAIN_COLOR = { physical_ai_robotics: "#10b981", telecom_6g: "#f59e0b" };
-const DOMAIN_LABEL = { physical_ai_robotics: "Robotics", telecom_6g: "6G" };
+import { domainColor, domainLabel } from "../constants/domains";
 
 export default function TopAssignees({ data }) {
   if (!data || data.length === 0) return null;
@@ -11,7 +10,7 @@ export default function TopAssignees({ data }) {
       <h2 style={styles.title}>Top Patent Assignees</h2>
       <div style={styles.list}>
         {data.map((row, i) => {
-          const color = DOMAIN_COLOR[row.domain_tag] ?? "#64748b";
+          const color = domainColor(row.domain_tag);
           const pct = (row.count / max) * 100;
           return (
             <div key={i} style={styles.row}>
@@ -20,7 +19,7 @@ export default function TopAssignees({ data }) {
                 <div style={styles.nameRow}>
                   <span style={styles.name}>{row.assignee}</span>
                   <span style={{ ...styles.domainBadge, background: color + "22", color }}>
-                    {DOMAIN_LABEL[row.domain_tag] ?? row.domain_tag}
+                    {domainLabel(row.domain_tag)}
                   </span>
                 </div>
                 <div style={styles.barTrack}>
