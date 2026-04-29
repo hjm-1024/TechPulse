@@ -200,13 +200,24 @@ def _fetch_page(
             return [], 0
 
         if resp.status_code == 403:
-            # EPO returns 403 when pagination goes beyond available results (free tier cap)
-            logger.debug("EPO OPS 403 (range=%s); no more results for this query", range_header)
-            return [], 0
+            if start == 1 and attempt == 0:
+                # 403 on first page of a query = token likely expired (EPO tokens last ~20 min)
+                logger.info("EPO OPS 403 on first page (range=%s) — refreshing token and retrying", range_header)
+                try:
+                    token = _get_token(auth_session)
+                    session.headers.update({"Authorization": f"Bearer {token}"})
+                except Exception as exc:
+                    logger.error("EPO OPS token refresh failed: %s", exc)
+                    return [], 0
+                continue
+            else:
+                # start>1 (or retry failed): pagination exhausted or persistent 403
+                logger.debug("EPO OPS 403 (range=%s, start=%d); no more results", range_header, start)
+                return [], 0
 
         if resp.status_code == 401:
             # Token expired — refresh once
-            logger.info("EPO OPS token expired, refreshing…")
+            logger.info("EPO OPS token expired (401), refreshing…")
             token = _get_token(auth_session)
             session.headers.update({"Authorization": f"Bearer {token}"})
             continue
