@@ -22,8 +22,9 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
   const [data, setData]   = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState(null);
-  const [threshold, setThreshold] = useState(0.82);
-  const [limit, setLimit] = useState(80);
+  const [threshold, setThreshold] = useState(0.75);
+  const [limit, setLimit] = useState(100);
+  const [balanced, setBalanced] = useState(true);
   const [tooltip, setTooltip] = useState(null);
 
   async function load() {
@@ -31,7 +32,7 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
     setData(null);
     setError(null);
     try {
-      const params = new URLSearchParams({ type, domain, limit, threshold });
+      const params = new URLSearchParams({ type, domain, limit, threshold, balanced });
       const resp = await fetch(`/api/insights/network?${params}`);
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -56,9 +57,9 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
     const { nodes, edges } = data;
     if (!nodes.length) return;
 
-    const el   = svgRef.current;
-    const W    = el.clientWidth || 900;
-    const H    = 560;
+    const el = svgRef.current;
+    const W  = el.clientWidth || 900;
+    const H  = 560;
 
     d3.select(el).selectAll("*").remove();
 
@@ -66,76 +67,136 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
       .attr("viewBox", `0 0 ${W} ${H}`)
       .style("background", "#0f1117");
 
-    // Arrow marker
-    svg.append("defs").append("marker")
-      .attr("id", "arrow")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 18).attr("refY", 0)
-      .attr("markerWidth", 4).attr("markerHeight", 4)
-      .attr("orient", "auto")
-      .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#334155");
+    // Zoom + pan
+    const g = svg.append("g");
+    svg.call(
+      d3.zoom()
+        .scaleExtent([0.3, 4])
+        .on("zoom", e => g.attr("transform", e.transform))
+    );
 
-    // Build D3 link/node data
     const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
     const links   = edges
       .filter(e => nodeMap[e.source] && nodeMap[e.target])
       .map(e => ({ ...e }));
 
+    // Degree map for hub highlighting
+    const degree = {};
+    links.forEach(e => {
+      degree[e.source] = (degree[e.source] || 0) + 1;
+      degree[e.target] = (degree[e.target] || 0) + 1;
+    });
+
+    // Unique domains → assign grid anchor positions for clustering
+    const domainList = [...new Set(nodes.map(n => n.domain_tag))];
+    const cols = Math.ceil(Math.sqrt(domainList.length));
+    const domainAnchor = {};
+    domainList.forEach((d, i) => {
+      const col = i % cols, row = Math.floor(i / cols);
+      const total_rows = Math.ceil(domainList.length / cols);
+      domainAnchor[d] = {
+        x: W * (0.15 + 0.7 * (col + 0.5) / cols),
+        y: H * (0.12 + 0.76 * (row + 0.5) / total_rows),
+      };
+    });
+
+    // Seed initial positions near domain anchor to bootstrap clustering
+    nodes.forEach(n => {
+      const a = domainAnchor[n.domain_tag] || { x: W / 2, y: H / 2 };
+      n.x = a.x + (Math.random() - 0.5) * 60;
+      n.y = a.y + (Math.random() - 0.5) * 60;
+    });
+
     const sim = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id(d => d.id).distance(d => (1 - d.weight) * 160 + 40))
-      .force("charge", d3.forceManyBody().strength(-120))
-      .force("center", d3.forceCenter(W / 2, H / 2))
-      .force("collision", d3.forceCollide(d => nodeRadius(d) + 4));
+      .force("link",
+        d3.forceLink(links)
+          .id(d => d.id)
+          .distance(d => (1 - d.weight) * 80 + 20)
+          .strength(d => 0.4 + d.weight * 0.4)
+      )
+      .force("charge", d3.forceManyBody().strength(-80).distanceMax(200))
+      .force("clusterX",
+        d3.forceX(d => (domainAnchor[d.domain_tag] || { x: W / 2 }).x).strength(0.12)
+      )
+      .force("clusterY",
+        d3.forceY(d => (domainAnchor[d.domain_tag] || { y: H / 2 }).y).strength(0.12)
+      )
+      .force("collision", d3.forceCollide(d => nodeRadius(d) + 3).strength(0.8))
+      .alphaDecay(0.025);
 
     // Edges
-    const link = svg.append("g")
-      .selectAll("line")
-      .data(links)
-      .join("line")
-      .attr("stroke", "#1e3a5f")
-      .attr("stroke-opacity", d => 0.3 + d.weight * 0.5)
-      .attr("stroke-width", d => (d.weight - 0.8) * 8);
+    const link = g.append("g").selectAll("line")
+      .data(links).join("line")
+      .attr("stroke", d => {
+        const sn = nodeMap[d.source?.id ?? d.source];
+        return sn ? domainColor(sn.domain_tag) : "#1e3a5f";
+      })
+      .attr("stroke-opacity", d => 0.2 + (d.weight - threshold) / (1 - threshold) * 0.6)
+      .attr("stroke-width", d => 1 + (d.weight - threshold) / (1 - threshold) * 3);
+
+    // Domain label backgrounds
+    const labelGroup = g.append("g").attr("pointer-events", "none");
 
     // Nodes
-    const node = svg.append("g")
-      .selectAll("circle")
-      .data(nodes)
-      .join("circle")
-      .attr("r", nodeRadius)
+    const node = g.append("g").selectAll("circle")
+      .data(nodes).join("circle")
+      .attr("r", d => nodeRadius(d) + (degree[d.id] ? Math.min(degree[d.id], 5) : 0))
       .attr("fill", nodeColor)
-      .attr("fill-opacity", 0.85)
-      .attr("stroke", "#0f1117")
-      .attr("stroke-width", 1.5)
+      .attr("fill-opacity", d => degree[d.id] ? 0.95 : 0.7)
+      .attr("stroke", d => degree[d.id] ? nodeColor(d) : "#0f1117")
+      .attr("stroke-width", d => degree[d.id] ? 2 : 1)
       .style("cursor", "pointer")
       .on("mouseover", (event, d) => {
+        const svgRect = el.getBoundingClientRect();
         setTooltip({
-          x: event.offsetX, y: event.offsetY,
+          x: event.clientX - svgRect.left,
+          y: event.clientY - svgRect.top,
           title: d.title,
           meta: type === "papers"
             ? `${d.source?.replace(/_/g, " ")} · ${d.citation_count ?? 0} citations · ${(d.published_date || "").slice(0, 7)}`
             : `${d.patent_number ?? ""} · ${clean(d.assignee)} · ${(d.publication_date || "").slice(0, 7)}`,
           color: nodeColor(d),
+          degree: degree[d.id] || 0,
         });
       })
       .on("mouseleave", () => setTooltip(null))
       .call(
         d3.drag()
-          .on("start", (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-          .on("drag",  (event, d) => { d.fx = event.x; d.fy = event.y; })
-          .on("end",   (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+          .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+          .on("drag",  (e, d) => { d.fx = e.x; d.fy = e.y; })
+          .on("end",   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
       );
 
+    // Domain cluster labels (appear after simulation settles)
+    const domainLabelData = domainList.map(d => ({ domain: d, anchor: domainAnchor[d] }));
+    const domainLabels = labelGroup.selectAll("text")
+      .data(domainLabelData).join("text")
+      .text(d => DOMAIN_META[d.domain]?.label_ko ?? d.domain)
+      .attr("x", d => d.anchor.x)
+      .attr("y", d => d.anchor.y - 28)
+      .attr("text-anchor", "middle")
+      .attr("fill", d => DOMAIN_META[d.domain]?.color ?? "#64748b")
+      .attr("font-size", 10)
+      .attr("font-weight", 600)
+      .attr("opacity", 0);
+
+    let tickCount = 0;
     sim.on("tick", () => {
+      tickCount++;
       link
         .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
         .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
       node
-        .attr("cx", d => Math.max(nodeRadius(d), Math.min(W - nodeRadius(d), d.x)))
-        .attr("cy", d => Math.max(nodeRadius(d), Math.min(H - nodeRadius(d), d.y)));
+        .attr("cx", d => d.x)
+        .attr("cy", d => d.y);
+      // Fade in domain labels once layout settles
+      if (tickCount > 80) {
+        domainLabels.attr("opacity", Math.min(1, (tickCount - 80) / 40));
+      }
     });
 
     return () => sim.stop();
-  }, [data]);
+  }, [data, threshold]);
 
   function clean(s) { return (s || "").replace(/\s*\[[A-Z]{2}\]/g, "").slice(0, 30); }
 
@@ -144,15 +205,25 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
       <div style={s.controls}>
         <span style={s.label}>노드 수</span>
         <select value={limit} onChange={e => setLimit(+e.target.value)} style={s.sel}>
-          {[40, 60, 80, 100, 150].map(v => <option key={v} value={v}>{v}</option>)}
+          {[60, 80, 100, 120, 150].map(v => <option key={v} value={v}>{v}</option>)}
         </select>
 
         <span style={s.label}>유사도 임계값</span>
         <select value={threshold} onChange={e => setThreshold(+e.target.value)} style={s.sel}>
-          {[0.78, 0.80, 0.82, 0.84, 0.86, 0.88].map(v => (
+          {[0.70, 0.72, 0.75, 0.78, 0.80, 0.82, 0.85].map(v => (
             <option key={v} value={v}>{v}</option>
           ))}
         </select>
+
+        <label style={{ ...s.label, display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={balanced}
+            onChange={e => setBalanced(e.target.checked)}
+            style={{ accentColor: "#3b82f6" }}
+          />
+          도메인 균형
+        </label>
 
         <button onClick={load} style={s.btn} disabled={loading}>
           {loading ? "임베딩 계산 중…" : "그래프 생성"}

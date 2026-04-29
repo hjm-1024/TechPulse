@@ -93,53 +93,81 @@ from backend.utils.embeddings import cosine_sim  # noqa: E402
 def network_graph(
     type:      str   = Query("papers"),
     domain:    str   = Query(""),
-    limit:     int   = Query(80, ge=10, le=200),
-    threshold: float = Query(0.82, description="Min cosine similarity for an edge"),
+    limit:     int   = Query(80, ge=10, le=300),
+    threshold: float = Query(0.75, description="Min cosine similarity for an edge"),
+    balanced:  bool  = Query(True, description="Sample top-K per domain for even distribution"),
 ):
     """
     Returns {nodes, edges} for D3 force-directed graph.
-    Nodes are the most-cited (papers) or most-recent (patents) documents.
-    Embeddings are computed on-the-fly for any node that doesn't have one yet,
-    then cached in the DB — so the first call is slower, subsequent calls are instant.
+
+    balanced=True (default): pick top K papers per domain so every domain is
+    represented and within-domain edges are dense.
+    balanced=False: top N globally by citation count.
+
+    Embeddings are computed on-the-fly for nodes missing them and cached in DB.
     """
     from backend.utils.embeddings import embed_record
 
-    where_parts = ["1=1"]
-    params: list = []
-    if domain:
-        where_parts.append("domain_tag = ?")
-        params.append(domain)
-    where = " AND ".join(where_parts)
-
-    if type == "papers":
-        sql = (
-            "SELECT id, title, abstract, source, citation_count, published_date, domain_tag, embedding "
-            f"FROM papers WHERE {where} ORDER BY citation_count DESC LIMIT ?"
-        )
-    else:
-        sql = (
-            "SELECT id, patent_number, title, abstract, source, publication_date, domain_tag, "
-            "assignee, country, embedding "
-            f"FROM patents WHERE {where} ORDER BY publication_date DESC LIMIT ?"
-        )
-
-    with get_connection(DB_PATH) as conn:
-        rows = conn.execute(sql, [*params, limit]).fetchall()
-
-    if not rows:
-        return {"nodes": [], "edges": [], "type": type, "embedded": 0}
-
     table = "papers" if type == "papers" else "patents"
 
-    # For rows missing embeddings, compute on-the-fly and cache
+    # ── Node selection ────────────────────────────────────────────────────────
+    if balanced and not domain:
+        # Stratified: top K per domain
+        with get_connection(DB_PATH) as conn:
+            domains = [
+                r[0] for r in conn.execute(
+                    f"SELECT DISTINCT domain_tag FROM {table} ORDER BY domain_tag"
+                ).fetchall()
+            ]
+        k = max(3, limit // max(len(domains), 1))
+        rows_data = []
+        for dtag in domains:
+            if type == "papers":
+                sql = (
+                    "SELECT id, title, abstract, source, citation_count, published_date, "
+                    "domain_tag, embedding FROM papers "
+                    "WHERE domain_tag=? ORDER BY citation_count DESC LIMIT ?"
+                )
+            else:
+                sql = (
+                    "SELECT id, patent_number, title, abstract, source, publication_date, "
+                    "domain_tag, assignee, country, embedding FROM patents "
+                    "WHERE domain_tag=? ORDER BY publication_date DESC LIMIT ?"
+                )
+            with get_connection(DB_PATH) as conn:
+                rows_data.extend([dict(r) for r in conn.execute(sql, (dtag, k)).fetchall()])
+    else:
+        where_parts = ["1=1"]
+        params: list = []
+        if domain:
+            where_parts.append("domain_tag = ?")
+            params.append(domain)
+        where = " AND ".join(where_parts)
+        if type == "papers":
+            sql = (
+                "SELECT id, title, abstract, source, citation_count, published_date, "
+                f"domain_tag, embedding FROM papers WHERE {where} "
+                "ORDER BY citation_count DESC LIMIT ?"
+            )
+        else:
+            sql = (
+                "SELECT id, patent_number, title, abstract, source, publication_date, "
+                f"domain_tag, assignee, country, embedding FROM patents WHERE {where} "
+                "ORDER BY publication_date DESC LIMIT ?"
+            )
+        with get_connection(DB_PATH) as conn:
+            rows_data = [dict(r) for r in conn.execute(sql, [*params, limit]).fetchall()]
+
+    if not rows_data:
+        return {"nodes": [], "edges": [], "type": type, "embedded": 0}
+
+    # ── Embedding: compute missing, cache in DB ────────────────────────────────
     embedded_now = 0
-    rows_data = [dict(r) for r in rows]
     for row in rows_data:
         if row.get("embedding"):
             continue
         vec = embed_record(row.get("title", ""), row.get("abstract") or "")
         if vec is None:
-            # Ollama not available — abort and tell the frontend
             raise HTTPException(
                 503,
                 detail="Ollama가 실행 중이지 않거나 nomic-embed-text 모델이 없어요. "
@@ -151,9 +179,8 @@ def network_graph(
         row["embedding"] = blob
         embedded_now += 1
 
-    # Build node list + embedding matrix
-    nodes = []
-    vecs  = []
+    # ── Build node list + embedding matrix ────────────────────────────────────
+    nodes, vecs = [], []
     for row in rows_data:
         if not row.get("embedding"):
             continue
@@ -166,16 +193,28 @@ def network_graph(
     if not nodes:
         return {"nodes": [], "edges": [], "type": type, "embedded": 0}
 
-    # Compute pairwise similarities → edges above threshold
+    # ── Pairwise similarity → edges ───────────────────────────────────────────
+    mat = np.stack(vecs)                          # (N, D)
+    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    mat_norm = mat / norms
+    sim_matrix = mat_norm @ mat_norm.T            # (N, N)  cosine similarities
+
     edges = []
-    for i in range(len(vecs)):
-        for j in range(i + 1, len(vecs)):
-            sim = cosine_sim(vecs[i], vecs[j])
+    for i in range(len(nodes)):
+        for j in range(i + 1, len(nodes)):
+            sim = float(sim_matrix[i, j])
             if sim >= threshold:
                 edges.append({
                     "source": nodes[i]["id"],
                     "target": nodes[j]["id"],
-                    "weight": round(float(sim), 3),
+                    "weight": round(sim, 3),
                 })
 
-    return {"nodes": nodes, "edges": edges, "type": type, "embedded": embedded_now}
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "type": type,
+        "embedded": embedded_now,
+        "domains": list({n["domain_tag"] for n in nodes}),
+    }
