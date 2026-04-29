@@ -23,11 +23,11 @@ def _emergence_score(citation_count: int, published_date: str) -> float:
     High score = many citations, published recently → hot topic.
     """
     try:
-        pub = datetime.strptime(published_date[:10], "%Y-%m-%d")
+        pub = datetime.strptime(published_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        days = max(1, (datetime.now(timezone.utc) - pub).days)
+        return math.log1p(citation_count) / math.log1p(days)
     except (ValueError, TypeError):
         return 0.0
-    days = max(1, (datetime.now(timezone.utc) - pub).days)
-    return math.log1p(citation_count) / math.log1p(days)
 
 
 @router.get("/emerging")
