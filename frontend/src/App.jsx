@@ -12,6 +12,7 @@ import SearchPage from "./components/SearchPage";
 import EmergingPapers from "./components/EmergingPapers";
 import NetworkGraph from "./components/NetworkGraph";
 import CollectionConfig from "./components/CollectionConfig";
+import ExpandableCard from "./components/ExpandableCard";
 
 const TABS = [
   { id: "papers",   label: "📄 Papers"   },
@@ -71,12 +72,18 @@ export default function App() {
           <>
             {summary ? <StatsCards data={summary} /> : <Skeleton h={120} />}
             <div style={styles.row2}>
-              {trend   ? <TrendChart data={trend} />   : <Skeleton h={360} />}
-              {sources ? <SourceChart data={sources} /> : <Skeleton h={320} />}
+              <ExpandableCard>
+                {trend ? <TrendChart data={trend} /> : <Skeleton h={360} />}
+              </ExpandableCard>
+              <ExpandableCard>
+                {sources ? <SourceChart data={sources} /> : <Skeleton h={320} />}
+              </ExpandableCard>
             </div>
-            {top
-              ? <TopPapers data={top} domain={topDomain} onDomainChange={setTopDomain} />
-              : <Skeleton h={400} />}
+            <ExpandableCard>
+              {top
+                ? <TopPapers data={top} domain={topDomain} onDomainChange={setTopDomain} />
+                : <Skeleton h={400} />}
+            </ExpandableCard>
           </>
         )}
 
@@ -85,8 +92,12 @@ export default function App() {
           <>
             <PatentStats data={patentSummary} />
             <div style={styles.row2}>
-              <PatentTrendChart data={patentTrend} />
-              <TopAssignees data={assignees} />
+              <ExpandableCard>
+                <PatentTrendChart data={patentTrend} />
+              </ExpandableCard>
+              <ExpandableCard>
+                <TopAssignees data={assignees} />
+              </ExpandableCard>
             </div>
           </>
         )}
@@ -97,7 +108,9 @@ export default function App() {
         {/* ── Insights ── */}
         {tab === "insights" && (
           <>
-            <EmergingPapers />
+            <ExpandableCard>
+              <EmergingPapers />
+            </ExpandableCard>
             <div style={{ marginTop: 24 }}>
               <div style={{ marginBottom: 12 }}>
                 <h2 style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9", margin: "0 0 4px" }}>
@@ -107,7 +120,9 @@ export default function App() {
                   임베딩 기반 코사인 유사도로 연결된 논문·특허 클러스터 시각화
                 </p>
               </div>
-              <NetworkGraph />
+              <ExpandableCard>
+                <NetworkGraph />
+              </ExpandableCard>
             </div>
           </>
         )}

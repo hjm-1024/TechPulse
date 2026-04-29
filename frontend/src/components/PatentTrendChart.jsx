@@ -1,10 +1,13 @@
+import { useContext } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { domainColor, domainLabel } from "../constants/domains";
+import { ExpandedContext } from "./ExpandableCard";
 
 export default function PatentTrendChart({ data }) {
+  const expanded = useContext(ExpandedContext);
   if (!data || data.length === 0) return null;
 
   const domains = [...new Set(data.flatMap(d => Object.keys(d).filter(k => k !== "month")))];
@@ -12,7 +15,7 @@ export default function PatentTrendChart({ data }) {
   return (
     <div style={styles.card}>
       <h2 style={styles.title}>Patent Filing Trend (Monthly)</h2>
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer width="100%" height={expanded ? 560 : 280}>
         <AreaChart data={data} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
           <defs>
             {domains.map((key) => {
