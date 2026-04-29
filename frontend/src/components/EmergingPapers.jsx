@@ -59,15 +59,24 @@ export default function EmergingPapers() {
   const [limit,  setLimit]  = useState(20);
   const [data,   setData]   = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error,  setError]  = useState(null);
 
   async function load() {
     setLoading(true);
     setData(null);
+    setError(null);
     try {
       const params = new URLSearchParams({ type, domain, days, limit });
       const resp = await fetch(`/api/insights/emerging?${params}`);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setError(err.detail || `서버 오류 (${resp.status})`);
+        return;
+      }
       const json = await resp.json();
       setData(json);
+    } catch (e) {
+      setError(`네트워크 오류: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -130,7 +139,7 @@ export default function EmergingPapers() {
         )}
       </div>
 
-      {!data && !loading && (
+      {!data && !loading && !error && (
         <div style={s.empty}>
           위 "분석 실행" 버튼을 눌러 신흥 기술 트렌드를 확인하세요
         </div>
@@ -140,8 +149,17 @@ export default function EmergingPapers() {
         <div style={s.empty}>분석 중…</div>
       )}
 
+      {error && (
+        <div style={{ ...s.empty, color: "#ef4444", fontSize: 13 }}>{error}</div>
+      )}
+
       {data && items.length === 0 && (
-        <div style={s.empty}>해당 조건에 맞는 데이터가 없습니다</div>
+        <div style={s.empty}>
+          해당 조건에 맞는 데이터가 없습니다.<br />
+          <span style={{ fontSize: 12, color: "#475569" }}>
+            Papers 수집 먼저 실행하세요: python run_collectors.py --type papers
+          </span>
+        </div>
       )}
 
       {items.length > 0 && (

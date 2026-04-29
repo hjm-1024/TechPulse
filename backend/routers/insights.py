@@ -40,7 +40,7 @@ def emerging_papers(
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     if type == "papers":
-        where = "published_date >= ? AND citation_count > 0"
+        where = "published_date >= ?"
         params: list = [since]
         if domain:
             where += " AND domain_tag = ?"

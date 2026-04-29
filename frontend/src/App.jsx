@@ -44,31 +44,25 @@ export default function App() {
           <h1 style={styles.title}>TechPulse</h1>
           <p style={styles.subtitle}>Tech Trend Intelligence Dashboard</p>
         </div>
-        <div style={styles.right}>
-          <nav style={styles.tabs}>
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => {
-                  setTab(t.id);
-                  if (t.id === "search") search.setType("papers");
-                }}
-                style={{
-                  ...styles.tab,
-                  color:        tab === t.id ? "#fff"    : "#94a3b8",
-                  background:   tab === t.id ? "#3b82f6" : "transparent",
-                  borderBottom: tab === t.id ? "2px solid #3b82f6" : "2px solid transparent",
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
-          <div style={styles.domains}>
-            <DomainTag color="#10b981">Physical AI & Robotics</DomainTag>
-            <DomainTag color="#f59e0b">Telecom & 6G</DomainTag>
-          </div>
-        </div>
+        <nav style={styles.tabs}>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => {
+                setTab(t.id);
+                if (t.id === "search") search.setType("papers");
+              }}
+              style={{
+                ...styles.tab,
+                color:        tab === t.id ? "#fff"    : "#94a3b8",
+                background:   tab === t.id ? "#3b82f6" : "transparent",
+                borderBottom: tab === t.id ? "2px solid #3b82f6" : "2px solid transparent",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
       </header>
 
       <main style={styles.main}>
@@ -125,14 +119,6 @@ export default function App() {
   );
 }
 
-function DomainTag({ color, children }) {
-  return (
-    <span style={{ background: color + "22", color, padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 500 }}>
-      {children}
-    </span>
-  );
-}
-
 function Skeleton({ h }) {
   return <div style={{ background: "#1e2330", borderRadius: 12, height: h, marginBottom: 24, opacity: 0.4 }} />;
 }
@@ -145,14 +131,12 @@ const styles = {
   },
   title:    { fontSize: 24, fontWeight: 700, color: "#f1f5f9", letterSpacing: "-0.5px" },
   subtitle: { fontSize: 13, color: "#64748b", marginTop: 2 },
-  right:    { display: "flex", alignItems: "center", gap: 24 },
   tabs:     { display: "flex", gap: 4 },
   tab: {
     padding: "8px 18px", border: "none", cursor: "pointer",
     fontSize: 13, fontWeight: 500, borderRadius: "6px 6px 0 0",
     transition: "all 0.15s",
   },
-  domains: { display: "flex", gap: 8 },
   main:    { maxWidth: 1280, margin: "0 auto", padding: "32px 40px" },
   row2:    { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 },
 };
