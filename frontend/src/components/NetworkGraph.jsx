@@ -21,6 +21,7 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
   const svgRef     = useRef(null);
   const [data, setData]   = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState(null);
   const [threshold, setThreshold] = useState(0.82);
   const [limit, setLimit] = useState(80);
   const [tooltip, setTooltip] = useState(null);
@@ -28,11 +29,23 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
   async function load() {
     setLoading(true);
     setData(null);
+    setError(null);
     try {
       const params = new URLSearchParams({ type, domain, limit, threshold });
       const resp = await fetch(`/api/insights/network?${params}`);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setError(err.detail || `서버 오류 (${resp.status})`);
+        return;
+      }
       const json = await resp.json();
+      if (json.nodes.length === 0) {
+        setError("논문 데이터가 없어요. Papers 수집 먼저 실행하세요.");
+        return;
+      }
       setData(json);
+    } catch (e) {
+      setError(`네트워크 오류: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -142,21 +155,49 @@ export default function NetworkGraph({ type = "papers", domain = "" }) {
         </select>
 
         <button onClick={load} style={s.btn} disabled={loading}>
-          {loading ? "그래프 생성 중…" : "그래프 생성"}
+          {loading ? "임베딩 계산 중…" : "그래프 생성"}
         </button>
 
         {data && (
           <span style={s.stat}>
             노드 {data.nodes.length}개 · 엣지 {data.edges.length}개
+            {data.embedded > 0 && (
+              <span style={{ color: "#22c55e", marginLeft: 6 }}>
+                ({data.embedded}개 임베딩 신규 생성 · 다음부터 빠름)
+              </span>
+            )}
           </span>
         )}
       </div>
 
       <div style={{ position: "relative" }}>
-        <svg ref={svgRef} style={s.svg} />
-        {!data && !loading && (
+        <svg ref={svgRef} style={{ ...s.svg, display: data ? "block" : "none" }} />
+        {!data && !loading && !error && (
           <div style={s.placeholder}>
-            위 "그래프 생성" 버튼을 눌러 유사도 네트워크를 시각화하세요
+            <div>
+              <p style={{ margin: "0 0 8px" }}>"그래프 생성" 버튼을 눌러 유사도 네트워크를 시각화하세요</p>
+              <p style={{ margin: 0, fontSize: 12, color: "#475569" }}>
+                첫 실행 시 Ollama(nomic-embed-text)로 임베딩을 계산합니다 — 노드 수만큼 시간이 걸려요
+              </p>
+            </div>
+          </div>
+        )}
+        {loading && (
+          <div style={s.placeholder}>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ margin: "0 0 8px", color: "#60a5fa" }}>임베딩 계산 중…</p>
+              <p style={{ margin: 0, fontSize: 12, color: "#475569" }}>
+                Ollama로 {limit}개 논문의 벡터를 생성하고 있어요. 잠시 기다려주세요.
+              </p>
+            </div>
+          </div>
+        )}
+        {error && (
+          <div style={s.placeholder}>
+            <div style={{ textAlign: "center", maxWidth: 420 }}>
+              <p style={{ margin: "0 0 8px", color: "#ef4444" }}>오류</p>
+              <p style={{ margin: 0, fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>{error}</p>
+            </div>
           </div>
         )}
         {tooltip && (

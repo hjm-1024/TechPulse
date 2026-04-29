@@ -99,22 +99,26 @@ def network_graph(
     """
     Returns {nodes, edges} for D3 force-directed graph.
     Nodes are the most-cited (papers) or most-recent (patents) documents.
-    Edges are cosine-similarity pairs above threshold.
+    Embeddings are computed on-the-fly for any node that doesn't have one yet,
+    then cached in the DB — so the first call is slower, subsequent calls are instant.
     """
-    where = "embedding IS NOT NULL"
+    from backend.utils.embeddings import embed_record
+
+    where_parts = ["1=1"]
     params: list = []
     if domain:
-        where += " AND domain_tag = ?"
+        where_parts.append("domain_tag = ?")
         params.append(domain)
+    where = " AND ".join(where_parts)
 
     if type == "papers":
         sql = (
-            "SELECT id, title, source, citation_count, published_date, domain_tag, embedding "
+            "SELECT id, title, abstract, source, citation_count, published_date, domain_tag, embedding "
             f"FROM papers WHERE {where} ORDER BY citation_count DESC LIMIT ?"
         )
     else:
         sql = (
-            "SELECT id, patent_number, title, source, publication_date, domain_tag, "
+            "SELECT id, patent_number, title, abstract, source, publication_date, domain_tag, "
             "assignee, country, embedding "
             f"FROM patents WHERE {where} ORDER BY publication_date DESC LIMIT ?"
         )
@@ -123,17 +127,44 @@ def network_graph(
         rows = conn.execute(sql, [*params, limit]).fetchall()
 
     if not rows:
-        return {"nodes": [], "edges": []}
+        return {"nodes": [], "edges": [], "type": type, "embedded": 0}
+
+    table = "papers" if type == "papers" else "patents"
+
+    # For rows missing embeddings, compute on-the-fly and cache
+    embedded_now = 0
+    rows_data = [dict(r) for r in rows]
+    for row in rows_data:
+        if row.get("embedding"):
+            continue
+        vec = embed_record(row.get("title", ""), row.get("abstract") or "")
+        if vec is None:
+            # Ollama not available — abort and tell the frontend
+            raise HTTPException(
+                503,
+                detail="Ollama가 실행 중이지 않거나 nomic-embed-text 모델이 없어요. "
+                       "`ollama pull nomic-embed-text` 후 Ollama를 실행하세요."
+            )
+        blob = vec.tobytes()
+        with get_connection(DB_PATH) as conn:
+            conn.execute(f"UPDATE {table} SET embedding=? WHERE id=?", (blob, row["id"]))
+        row["embedding"] = blob
+        embedded_now += 1
 
     # Build node list + embedding matrix
     nodes = []
     vecs  = []
-    for row in rows:
-        d = {k: row[k] for k in row.keys() if k != "embedding"}
+    for row in rows_data:
+        if not row.get("embedding"):
+            continue
+        d = {k: v for k, v in row.items() if k not in ("embedding", "abstract")}
         if type == "patents":
             d["assignee"] = clean_assignee(d.get("assignee", ""))
         nodes.append(d)
         vecs.append(np.frombuffer(bytes(row["embedding"]), dtype=np.float32))
+
+    if not nodes:
+        return {"nodes": [], "edges": [], "type": type, "embedded": 0}
 
     # Compute pairwise similarities → edges above threshold
     edges = []
@@ -147,4 +178,4 @@ def network_graph(
                     "weight": round(float(sim), 3),
                 })
 
-    return {"nodes": nodes, "edges": edges, "type": type}
+    return {"nodes": nodes, "edges": edges, "type": type, "embedded": embedded_now}
