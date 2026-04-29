@@ -12,7 +12,7 @@ Set in .env:
 
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Generator
 
 import requests
@@ -66,7 +66,7 @@ def _make_session(token: str) -> requests.Session:
 # ── Query builder ─────────────────────────────────────────────────────────────
 
 def _build_cql(keyword: str, days_back: int) -> str:
-    since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y%m%d")
+    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y%m%d")
     # CQL: title or abstract contains keyword, recent publications
     escaped = keyword.replace('"', '\\"')
     return f'(ti="{escaped}" OR ab="{escaped}") AND pd>={since}'
@@ -197,6 +197,11 @@ def _fetch_page(
         if resp.status_code == 400:
             # Query syntax error or range out of bounds — stop gracefully
             logger.debug("EPO OPS 400 (range=%s); likely exhausted results", range_header)
+            return [], 0
+
+        if resp.status_code == 403:
+            # EPO returns 403 when pagination goes beyond available results (free tier cap)
+            logger.debug("EPO OPS 403 (range=%s); no more results for this query", range_header)
             return [], 0
 
         if resp.status_code == 401:

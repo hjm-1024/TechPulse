@@ -18,7 +18,7 @@ Available domains:
 """
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.config import DB_PATH
 from backend.db.schema import init_db, upsert_papers, dedup_papers
@@ -57,7 +57,7 @@ def _load_keywords_from_db(domain: str | None = None) -> tuple[list[str], dict[s
 def _mark_collected(keywords: list[str]) -> None:
     """수집 완료된 키워드의 last_collected 타임스탬프 업데이트."""
     from backend.db.schema import get_connection
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with get_connection(DB_PATH) as conn:
         for kw in keywords:
             conn.execute(

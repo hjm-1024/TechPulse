@@ -9,7 +9,7 @@ Set in .env:
 """
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Generator
 
 import requests
@@ -31,7 +31,7 @@ _MAX_RETRIES     = 4
 
 
 def _build_payload(keyword: str, days_back: int, offset: int) -> dict:
-    since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
     return {
         "query": {
             "bool": {

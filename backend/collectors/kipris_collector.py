@@ -9,7 +9,7 @@ Endpoint: http://plus.kipris.or.kr/openapi/rest/patUtiModInfoSearchSevice/
 
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Generator
 
 import requests
@@ -34,8 +34,8 @@ _SEARCH_URL = "http://plus.kipris.or.kr/openapi/rest/patUtiModInfoSearchSevice/w
 
 
 def _build_params(keyword: str, page: int, days_back: int) -> dict:
-    since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y%m%d")
-    today = datetime.utcnow().strftime("%Y%m%d")
+    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y%m%d")
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
     return {
         "ServiceKey": KIPRIS_API_KEY,
         "word": keyword,

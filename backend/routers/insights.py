@@ -3,7 +3,7 @@
 /api/insights/network   — similarity graph nodes + edges for D3 visualization
 """
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Query
 import numpy as np
@@ -26,7 +26,7 @@ def _emergence_score(citation_count: int, published_date: str) -> float:
         pub = datetime.strptime(published_date[:10], "%Y-%m-%d")
     except (ValueError, TypeError):
         return 0.0
-    days = max(1, (datetime.utcnow() - pub).days)
+    days = max(1, (datetime.now(timezone.utc) - pub).days)
     return math.log1p(citation_count) / math.log1p(days)
 
 
@@ -37,7 +37,7 @@ def emerging_papers(
     limit:  int = Query(20, ge=1, le=100),
     type:   str = Query("papers", description="papers | patents"),
 ):
-    since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     if type == "papers":
         where = "published_date >= ? AND citation_count > 0"

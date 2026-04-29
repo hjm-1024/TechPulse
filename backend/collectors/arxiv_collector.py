@@ -6,7 +6,7 @@ Rate limit: arXiv asks for ≤1 request / 3 seconds; we respect that here.
 
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Generator
 
 import requests
@@ -28,7 +28,7 @@ _RATE_LIMIT_SECS = 3.0
 
 def _build_query(keyword: str, days_back: int = 90) -> str:
     # arXiv submittedDate requires 14-digit timestamps (YYYYMMDDHHMMSS)
-    since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y%m%d000000")
+    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y%m%d000000")
     return f'(ti:"{keyword}" OR abs:"{keyword}") AND submittedDate:[{since} TO 99991231235959]'
 
 
