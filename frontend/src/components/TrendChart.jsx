@@ -3,11 +3,14 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { domainColor, domainLabel } from "../constants/domains";
+import { domainLabel } from "../constants/domains";
 import { ExpandedContext } from "./ExpandableCard";
+import { DomainFilter, useDomainHighlight } from "./DomainFilter";
 
 export default function TrendChart({ data }) {
   const expanded = useContext(ExpandedContext);
+  const { selected, setSelected, styleFor, isFaded } = useDomainHighlight(expanded);
+
   if (!data || data.length === 0) return <Empty />;
 
   // Derive domain keys from data (all keys except "month")
@@ -16,6 +19,11 @@ export default function TrendChart({ data }) {
   return (
     <div style={styles.card}>
       <h2 style={styles.title}>Monthly Publication Trend</h2>
+
+      {expanded && (
+        <DomainFilter domains={domains} selected={selected} onChange={setSelected} />
+      )}
+
       <ResponsiveContainer width="100%" height={expanded ? 600 : 320}>
         <LineChart data={data} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
@@ -39,17 +47,27 @@ export default function TrendChart({ data }) {
             formatter={(value) => domainLabel(value)}
             wrapperStyle={{ color: "#94a3b8", fontSize: 11 }}
           />
-          {domains.map((d) => (
-            <Line
-              key={d}
-              type="monotone"
-              dataKey={d}
-              stroke={domainColor(d)}
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4 }}
-            />
-          ))}
+          {/* Render faded lines first so the highlighted one paints on top */}
+          {domains
+            .slice()
+            .sort((a, b) => Number(isFaded(b)) - Number(isFaded(a)))
+            .map((d) => {
+              const { color, opacity } = styleFor(d);
+              const faded = isFaded(d);
+              return (
+                <Line
+                  key={d}
+                  type="monotone"
+                  dataKey={d}
+                  stroke={color}
+                  strokeOpacity={opacity}
+                  strokeWidth={faded ? 1.2 : (selected === d ? 2.8 : 2)}
+                  dot={false}
+                  activeDot={faded ? false : { r: 4 }}
+                  isAnimationActive={false}
+                />
+              );
+            })}
         </LineChart>
       </ResponsiveContainer>
     </div>
