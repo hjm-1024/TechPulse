@@ -12,6 +12,7 @@ export const DOMAIN_META = {
   advanced_materials:   { label: "Advanced Materials",     label_ko: "신소재",          color: "#84cc16" },
   web3_blockchain:      { label: "Web3 & Blockchain",      label_ko: "블록체인/Web3",    color: "#f97316" },
   climate_tech:         { label: "Climate Tech",           label_ko: "기후테크",         color: "#06b6d4" },
+  low_carbon:           { label: "Low-Carbon",             label_ko: "저탄소",           color: "#14b8a6" },
 };
 
 export function domainLabel(tag) {

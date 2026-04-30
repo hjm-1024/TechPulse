@@ -110,6 +110,19 @@ _DEFAULT_KEYWORDS = [
     ("sustainable aviation fuel",      "climate_tech"),
     ("circular economy",               "climate_tech"),
     ("precision fermentation",         "climate_tech"),
+    # Low-Carbon (저탄소: 산업·구조 탈탄소화)
+    ("decarbonization",                "low_carbon"),
+    ("net zero",                       "low_carbon"),
+    ("carbon neutral",                 "low_carbon"),
+    ("green steel",                    "low_carbon"),
+    ("low-carbon cement",              "low_carbon"),
+    ("low-carbon concrete",            "low_carbon"),
+    ("industrial decarbonization",     "low_carbon"),
+    ("carbon footprint",               "low_carbon"),
+    ("carbon accounting",              "low_carbon"),
+    ("emission reduction",             "low_carbon"),
+    ("methane abatement",              "low_carbon"),
+    ("BECCS",                          "low_carbon"),
 ]
 
 # 도메인별 메타데이터 (UI 표시용)
@@ -126,6 +139,7 @@ DOMAIN_META: dict[str, dict] = {
     "advanced_materials":   {"label": "Advanced Materials",     "label_ko": "신소재",          "color": "#84cc16"},
     "web3_blockchain":      {"label": "Web3 & Blockchain",      "label_ko": "블록체인/Web3",    "color": "#f97316"},
     "climate_tech":         {"label": "Climate Tech",           "label_ko": "기후테크",         "color": "#06b6d4"},
+    "low_carbon":           {"label": "Low-Carbon",             "label_ko": "저탄소",          "color": "#14b8a6"},
 }
 
 

@@ -14,7 +14,7 @@ Usage:
 Available domains:
     physical_ai_robotics  generative_ai  telecom_6g  biotech_life_science
     quantum  semiconductors  clean_energy  space_tech  bci_neurotech
-    advanced_materials  web3_blockchain  climate_tech
+    advanced_materials  web3_blockchain  climate_tech  low_carbon
 """
 
 import argparse
