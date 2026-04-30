@@ -10,6 +10,7 @@ import PatentTrendChart from "./components/PatentTrendChart";
 import TopAssignees from "./components/TopAssignees";
 import SearchPage from "./components/SearchPage";
 import EmergingPapers from "./components/EmergingPapers";
+import TrendAnalysis from "./components/TrendAnalysis";
 import NetworkGraph from "./components/NetworkGraph";
 import CollectionConfig from "./components/CollectionConfig";
 import ExpandableCard from "./components/ExpandableCard";
@@ -110,6 +111,9 @@ export default function App() {
           <>
             <ExpandableCard>
               <EmergingPapers />
+            </ExpandableCard>
+            <ExpandableCard>
+              <TrendAnalysis />
             </ExpandableCard>
             <div style={{ marginTop: 24 }}>
               <div style={{ marginBottom: 12 }}>

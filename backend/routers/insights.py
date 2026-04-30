@@ -5,12 +5,13 @@
 import math
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 import numpy as np
 
 from backend.config import DB_PATH
 from backend.db.schema import get_connection
 from backend.utils.text_utils import clean_assignee
+from backend.utils.text_analysis import tfidf_keywords, keybert_keywords
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
@@ -217,4 +218,101 @@ def network_graph(
         "type": type,
         "embedded": embedded_now,
         "domains": list({n["domain_tag"] for n in nodes}),
+    }
+
+
+# ── trend keyword analysis (TF-IDF / BERT) ────────────────────────────────────
+
+@router.get("/trend-analysis")
+def trend_analysis(
+    method: str = Query("tfidf", description="tfidf | bert"),
+    type:   str = Query("papers", description="papers | patents"),
+    domain: str = Query("", description="Filter by domain_tag"),
+    days:   int = Query(365, ge=7, le=3650),
+    top_k:  int = Query(20, ge=5, le=50),
+):
+    """
+    Keyword extraction over a filtered subset of the corpus.
+
+    - tfidf: term frequency in subset × IDF over the entire table.
+    - bert : KeyBERT-style — candidate n-grams ranked by cosine similarity
+             to the centroid of subset document embeddings (Ollama).
+    """
+    if method not in ("tfidf", "bert"):
+        raise HTTPException(400, detail="method must be 'tfidf' or 'bert'")
+    if type not in ("papers", "patents"):
+        raise HTTPException(400, detail="type must be 'papers' or 'patents'")
+
+    table = "papers" if type == "papers" else "patents"
+    date_col = "published_date" if type == "papers" else "publication_date"
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    where_parts = [f"{date_col} >= ?"]
+    params: list = [since]
+    if domain:
+        where_parts.append("domain_tag = ?")
+        params.append(domain)
+    where = " AND ".join(where_parts)
+
+    # subset: filtered docs (need embedding for bert)
+    subset_cols = "id, title, abstract, domain_tag, embedding"
+    with get_connection(DB_PATH) as conn:
+        subset_rows = [
+            dict(r) for r in conn.execute(
+                f"SELECT {subset_cols} FROM {table} WHERE {where} "
+                f"ORDER BY {date_col} DESC LIMIT 500",
+                params,
+            ).fetchall()
+        ]
+
+    if not subset_rows:
+        return {
+            "method": method, "type": type, "domain": domain, "days": days,
+            "subset_size": 0, "keywords": [], "message": "조건에 해당하는 문서가 없습니다.",
+        }
+
+    if method == "tfidf":
+        # IDF corpus: full table (titles + abstracts only, no embedding column)
+        with get_connection(DB_PATH) as conn:
+            corpus_rows = [
+                dict(r) for r in conn.execute(
+                    f"SELECT title, abstract FROM {table}"
+                ).fetchall()
+            ]
+        keywords = tfidf_keywords(subset_rows, corpus_rows, top_k=top_k)
+        return {
+            "method": "tfidf",
+            "type": type,
+            "domain": domain,
+            "days": days,
+            "subset_size": len(subset_rows),
+            "corpus_size": len(corpus_rows),
+            "keywords": keywords,
+        }
+
+    # method == bert
+    keywords, fresh = keybert_keywords(subset_rows, top_k=top_k)
+    if not keywords:
+        raise HTTPException(
+            503,
+            detail="Ollama 임베딩이 필요합니다. `ollama pull nomic-embed-text` 후 "
+                   "Ollama를 실행하세요.",
+        )
+    # cache freshly computed doc embeddings back to DB
+    if fresh:
+        with get_connection(DB_PATH) as conn:
+            for doc_id, blob in fresh:
+                conn.execute(
+                    f"UPDATE {table} SET embedding=? WHERE id=?",
+                    (blob, doc_id),
+                )
+
+    return {
+        "method": "bert",
+        "type": type,
+        "domain": domain,
+        "days": days,
+        "subset_size": len(subset_rows),
+        "embedded_now": len(fresh),
+        "keywords": keywords,
     }
