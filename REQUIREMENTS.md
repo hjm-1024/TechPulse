@@ -1,15 +1,27 @@
 # TechPulse 요구사항 명세서 (Requirements Specification)
 
-**버전:** 1.0  
-**작성일:** 2026-04-22  
+**버전:** 1.3
+**작성일:** 2026-04-22
+**갱신일:** 2026-05-03
 **프로젝트:** TechPulse - 기술 인텔리전스 대시보드
+
+---
+
+## 변경 이력
+
+| 버전 | 일자 | 주요 변경 |
+|------|------|----------|
+| 1.0 | 2026-04-22 | 초안 (논문·특허 수집, 기본 검색·요약·트렌드) |
+| 1.1 | - | 텍스트 전처리 모듈 / 배치 dedup |
+| 1.2 | - | 검색 UI(2컬럼·히스토리·하이라이팅) |
+| **1.3** | **2026-05-03** | **도메인 13개 확장, 멀티라벨 재분류, `quality_flag`, 텍스트 정제 wire-in, 숨은 중복 탐지, 마이그레이션 CLI, 데이터 관리 UI, TF-IDF/BERT 분석** |
 
 ---
 
 ## 1. 시스템 개요
 
 ### 1.1 목적
-물리적 AI/로보틱스 및 통신/6G 분야의 최신 논문과 특허를 자동으로 수집·분석·시각화하여, 연구자 및 기술 전략 담당자가 기술 트렌드를 신속하게 파악할 수 있게 한다.
+다분야(물리 AI·통신·양자·반도체·신소재·저탄소·바이오 등 13개 도메인)의 최신 논문과 특허를 자동으로 수집·정제·재분류·분석·시각화하여, 연구자 및 기술 전략 담당자가 기술 트렌드를 신속하게 파악하게 한다.
 
 ### 1.2 핵심 모델 및 대상
 
@@ -18,26 +30,25 @@
 | 임베딩 모델 | `nomic-embed-text` (Ollama, 768차원 float32) |
 | 요약 모델 | `qwen3:14b-q8_0` (일반) / `qwen2.5:32b` (고품질) |
 | 검색 대상 | 논문 (arXiv, Semantic Scholar, OpenAlex) + 특허 (Lens, EPO, KIPRIS) |
-| 도메인 | `physical_ai_robotics`, `telecom_6g` |
+| 도메인 (13) | physical_ai_robotics, telecom_6g, quantum, semiconductors, advanced_materials, low_carbon, climate_tech, energy, biotech, cybersecurity, space, autonomous_driving, xr_metaverse |
 | 언어 | 수집: 영어 / 요약 출력: 한국어 |
 | 저장소 | SQLite (WAL 모드) |
 | 인프라 | FastAPI + React/Vite, Ollama 로컬 서버 |
+| 운영 모드 | 단일 머신 로컬 (서버 배포는 비목표) |
 
 ### 1.3 네트워크 구성
 
 ```
-[수집 서버 (run_collectors.py)]
-    ↕ HTTP (외부 API)
+[수집 서버 (run_collectors.py | run_migration.py)]
+    ↕ HTTP (외부 API) | 함수 호출 (마이그레이션)
 [SQLite DB]
     ↕ SQL
-[FastAPI 백엔드 :8000]
+[FastAPI 백엔드 :8000]  ──── BackgroundTasks (수집/정제/재분류 잡)
     ↕ REST JSON
 [React 프론트 :5173]
     ↕ localhost HTTP
-[Ollama :11434]  ← 임베딩·요약 요청을 FastAPI가 전달
+[Ollama :11434]  ← 임베딩·요약·도메인 프로토타입을 FastAPI/CLI가 전달
 ```
-
-모든 구성 요소가 단일 머신 내 로컬에서 동작. 외부 의존성은 데이터 수집 API만 해당.
 
 ---
 
@@ -46,310 +57,195 @@
 ### 2.1 데이터 수집 (FR-COL)
 
 #### FR-COL-01: 논문 수집
+키워드 기반으로 논문을 수집해 SQLite에 UPSERT.
 
-**기능:** 키워드 기반으로 논문 수집, SQLite에 UPSERT 저장
-
-**작동 원리:**
-1. `collection_config` 테이블의 활성화된 키워드를 순회
-2. 각 키워드에 대해 설정된 소스(arxiv, semantic_scholar, openalex)별로 수집기 호출
-3. 수집기가 HTTP 요청 → 응답 파싱 → `dict` 목록 반환
-4. `upsert_papers()` 함수가 `INSERT OR REPLACE`로 중복 처리
-5. UNIQUE 제약: `doi` 또는 `(title, source)` 조합
-
-**사용 API:**
-- arXiv: `http://export.arxiv.org/api/query?search_query=ti:"키워드"+OR+abs:"키워드"&start=0&max_results=100`
-- Semantic Scholar: `https://api.semanticscholar.org/graph/v1/paper/search?query=키워드&fields=title,abstract,authors,citationCount,externalIds,venue`
-- OpenAlex: `https://api.openalex.org/works?filter=keyword.search:키워드,is_oa:true&sort=cited_by_count:desc`
-
-**입력:** 키워드 문자열, days_back (수집 기간), 도메인 태그  
-**출력:** papers 테이블에 레코드 삽입/갱신
-
----
+- 흐름: `collection_config` 활성 키워드 순회 → 소스(arxiv / semantic_scholar / openalex)별 수집기 호출 → dict 리스트 반환 → **`clean_text()` 자동 적용** → `is_valid_abstract()` 실패 시 `quality_flag='short_abstract'` 마킹 → `upsert_papers()`
+- UNIQUE: `doi` 또는 `(title, source)`
+- 충돌 시: citation_count 비교, 큰 값 유지
 
 #### FR-COL-02: 특허 수집
+키워드 기반 Lens/EPO OPS/KIPRIS 수집. 동일 패턴, `(patent_number, source)` UNIQUE.
 
-**기능:** 키워드 기반으로 특허 수집 (Lens, EPO OPS, KIPRIS)
-
-**작동 원리:**
-1. 논문 수집과 동일한 키워드 순회 방식
-2. 각 특허 수집기가 XML/JSON 응답 파싱
-3. EPO는 OAuth2 토큰 발급 후 XML CQL 쿼리 실행
-4. KIPRIS는 공공 XML API 호출 (한국 특허청)
-5. `upsert_patents()`로 `(patent_number, source)` UNIQUE 기준 UPSERT
-
-**사용 API:**
-- Lens.org: `POST https://api.lens.org/patent/search` (JSON body)
-- EPO OPS: `GET https://ops.epo.org/3.2/rest-services/published-data/search/biblio` (XML CQL)
-- KIPRIS: `GET http://plus.kipris.or.kr/openapi/rest/patUtiModInfoSearchSevice/wordSearchInfo` (XML)
-
-**입력:** 키워드, 날짜 범위  
-**출력:** patents 테이블에 레코드 삽입/갱신
-
----
-
-#### FR-COL-03: EPO 특허 데이터 보강
-
-**기능:** EPO 수집 시 누락된 출원인·발명자 정보를 개별 특허 조회로 보완
-
-**작동 원리:**
-1. `assignee IS NULL OR assignee = ''` 인 EPO 특허 목록 조회
-2. 각 특허번호로 `https://ops.epo.org/3.2/rest-services/published-data/publication/docdb/{num}/biblio` 호출
-3. XML에서 `applicant`, `inventor` 태그 파싱
-4. `clean_party_name()`으로 `[KR]`, `[US]` 등 국가코드 제거 후 저장
-
----
+#### FR-COL-03: EPO 데이터 보강
+`assignee` 누락 EPO 특허는 개별 biblio 호출로 출원인·발명자 보충, `clean_party_name()`으로 국가코드 제거.
 
 #### FR-COL-04: 임베딩 생성
+embedding이 없는 레코드 일괄 생성 (`title + abstract`, max 8000자, Ollama nomic-embed-text). float32 768d → bytes BLOB 저장.
 
-**기능:** 수집된 논문/특허의 제목+초록을 벡터화
-
-**작동 원리:**
-1. embedding이 없는 레코드 조회
-2. `title + " " + abstract` 조합 (최대 8000자 truncate)
-3. `POST http://localhost:11434/api/embeddings` 요청 (`model: nomic-embed-text`)
-4. 응답 embedding 배열 → `numpy.array(dtype=float32)` → `bytes()` BLOB으로 저장
-
-**모델:** `nomic-embed-text` (768차원)  
-**서버:** Ollama (localhost:11434)
+#### FR-COL-05: 백그라운드 수집 잡 (v1.3)
+프론트 또는 API에서 수집을 트리거할 수 있어야 함.
+- `POST /api/config/collect {domains:[...], sources:[...], days_back:7}` → `collection_jobs` 등록 → FastAPI BackgroundTasks 또는 자체 JobRunner가 실행 → `progress`, `log_tail` 갱신 → `cancel` 가능
+- 동시에 같은 `kind`의 잡은 1개만 (큐잉)
 
 ---
 
 ### 2.2 검색 (FR-SRCH)
 
 #### FR-SRCH-01: 키워드 검색
-
-**기능:** SQL LIKE를 이용한 텍스트 기반 검색
-
-**작동 원리:**
+SQL LIKE 기반. 멀티라벨 도메인 필터는 `paper_domains` JOIN 기반.
 ```sql
-SELECT * FROM papers
-WHERE (title LIKE '%query%' OR abstract LIKE '%query%')
-  AND domain_tag = :domain
-  AND source = :source
-ORDER BY citation_count DESC
-LIMIT :page_size OFFSET :offset
+SELECT p.* FROM papers p
+LEFT JOIN paper_domains pd ON pd.paper_id = p.id
+WHERE (p.title LIKE :q OR p.abstract LIKE :q)
+  AND (:domain IS NULL OR (pd.domain_tag = :domain AND pd.score >= 0.45))
+  AND p.quality_flag IS NULL
+ORDER BY citation_count DESC LIMIT :n OFFSET :off
 ```
 
-**API:** `GET /api/papers?q=keyword&domain=physical_ai_robotics&source=arxiv&sort_by=citation_count&page=1`  
-**응답:** `{total, page, page_size, pages, items: [...]}`
-
----
-
-#### FR-SRCH-02: 의미 검색 (Semantic Search)
-
-**기능:** 임베딩 기반 코사인 유사도 검색
-
-**작동 원리:**
-1. 검색어를 Ollama로 임베딩 (동일 모델: nomic-embed-text)
-2. DB에서 embedding이 있는 모든 레코드 로드
-3. 쿼리 벡터와 각 레코드의 저장된 벡터 사이 코사인 유사도 계산
-4. 유사도 내림차순 정렬, 상위 limit개 반환
-
-**코사인 유사도:**
-```
-similarity = dot(a, b) / (norm(a) × norm(b))
-```
-
-**API:** `GET /api/search/semantic?q=텍스트&type=papers&domain=telecom_6g&limit=20`  
-**응답:** `[{id, title, abstract, ..., similarity: 0.92}]`
-
-**제약:** 임베딩이 사전에 생성되어 있어야 함
-
----
+#### FR-SRCH-02: 의미 검색 (Semantic)
+쿼리 임베딩 vs 저장 임베딩 코사인 유사도. `quality_flag IS NULL` 자동 제외.
 
 #### FR-SRCH-03: 유사 문서 탐색
-
-**기능:** 특정 문서와 가장 유사한 다른 문서 탐색
-
-**작동 원리:**
-1. 대상 문서의 embedding 로드
-2. 같은 type의 모든 문서 embedding과 코사인 유사도 계산
-3. 자기 자신 제외 후 상위 N개 반환
-
-**API:** `GET /api/similar?type=papers&id=123&limit=5`
-
----
+대상 문서 임베딩 vs 같은 type의 모든 임베딩.
 
 #### FR-SRCH-04: 논문↔특허 교차 링크
-
-**기능:** 논문에서 관련 특허 (또는 반대) 탐색
-
-**API:** `GET /api/cross?from_type=papers&from_id=123&to_type=patents&limit=5`
+`/api/cross?from_type=papers&from_id=123&to_type=patents&limit=5`
 
 ---
 
 ### 2.3 AI 요약 (FR-AI)
 
 #### FR-AI-01: LLM 한국어 요약
-
-**기능:** 논문/특허 제목+초록을 한국어 3~4문장으로 요약
-
-**작동 원리:**
-1. 프론트에서 `POST /api/summarize` 요청 (title, abstract, type, quality 포함)
-2. FastAPI가 Ollama에 스트리밍 요청
-3. 프롬프트: `"다음 {type}을 한국어로 3~4문장으로 요약해주세요:\n제목: {title}\n내용: {abstract}"`
-4. `StreamingResponse`로 토큰 단위 스트리밍 전달
-5. 프론트에서 점진적 텍스트 렌더링
-
-**모델:**
-- 일반: `qwen3:14b-q8_0` (빠름)
-- 고품질: `qwen2.5:32b` (quality=true 시)
-
-**API:** `POST /api/summarize` `{title, abstract, type, quality: bool}`
+`POST /api/summarize {title, abstract, type, quality}` → Ollama 스트리밍 → 점진적 렌더링.
 
 ---
 
-### 2.4 트렌드 분석 (FR-TREND)
+### 2.4 트렌드·인사이트 분석 (FR-TREND)
 
 #### FR-TREND-01: 월별 트렌드
+도메인별 월간 카운트. 멀티라벨이라 한 문서가 여러 도메인 합계에 기여.
 
-**기능:** 월별 논문/특허 수 집계
+#### FR-TREND-02: 이상치 감지 (v1.3)
+EWMA(span=6) 잔차 z-score → `|z| ≥ 2`인 달에 🔥 뱃지. 응답 시 계산, 별도 저장 없음.
 
-**작동 원리:**
-```sql
-SELECT strftime('%Y-%m', published_date) as month,
-       domain_tag, COUNT(*) as count
-FROM papers
-WHERE (:domain IS NULL OR domain_tag = :domain)
-GROUP BY month, domain_tag
-ORDER BY month
-```
+#### FR-TREND-03: 급부상 문서 (Emerging)
+`emergence_score = log(1+citation) / log(1+days_since_publication)` 상위 N개.
 
-**API:** `GET /api/trend?domain=physical_ai_robotics`  
-**응답:** `[{month: "2025-01", physical_ai_robotics: 42, telecom_6g: 18}]`
+#### FR-TREND-04: 분기별 TF-IDF 시계열 (v1.3)
+- `/api/analysis/tfidf-trend?domain=...&top_k=20`
+- 분기 단위로 TF-IDF 점수를 계산 → 직전 분기 대비 급상승 키워드 top-K 반환
+- "최근에 새로 부상한 단어"를 어휘 기반으로 검출 (인용 기반 emerging과 보완)
 
----
-
-#### FR-TREND-02: 급부상 논문/특허
-
-**기능:** 인용 속도가 빠른 최신 문서 탐지
-
-**작동 원리:**
-```
-emergence_score = log(1 + citation_count) / log(1 + days_since_publication)
-```
-- 최근에 발표되었으면서 인용이 빠르게 쌓이는 문서를 발굴
-- days 파라미터로 조회 기간 설정
-
-**API:** `GET /api/insights/emerging?domain=telecom_6g&days=90&limit=10&type=papers`
+#### FR-TREND-05: BERT 군집 (v1.3)
+- `/api/analysis/bert-clusters?domain=...&min_cluster=10`
+- HDBSCAN으로 임베딩 군집 → 각 군집의 대표 키워드(TF-IDF) 자동 라벨
 
 ---
 
 ### 2.5 네트워크 그래프 (FR-GRAPH)
-
-#### FR-GRAPH-01: 유사도 기반 문서 네트워크
-
-**기능:** 코사인 유사도로 연결된 문서 네트워크 D3 시각화
-
-**작동 원리:**
-1. 도메인 내 상위 N개 문서 로드 (embedding 있는 것만)
-2. O(N²) 쌍 유사도 계산
-3. similarity >= threshold (기본 0.82) 쌍을 엣지로 등록
-4. `{nodes: [...], edges: [{source, target, weight}]}` 반환
-5. D3 force-directed simulation으로 레이아웃 자동 계산
-
-**API:** `GET /api/insights/network?type=papers&domain=physical_ai_robotics&limit=50&threshold=0.82`
+도메인 내 상위 N개 문서 임베딩 → 코사인 ≥ threshold(기본 0.82) 쌍을 엣지로 → D3 force-directed.
 
 ---
 
-### 2.5-a 텍스트 전처리 (FR-CLEAN) ✅ v1.1
+### 2.6 텍스트 전처리 (FR-CLEAN) — v1.3 강화
 
-#### FR-CLEAN-01: HTML/LaTeX 정제
+#### FR-CLEAN-01: 자동 정제 (wire-in)
+**모든 수집 경로의 upsert 직전에 `clean_text()` 자동 적용** — HTML 엔티티 디코딩, LaTeX/HTML 태그 제거, 공백 정규화. `cleaned_at` 타임스탬프 기록.
 
-**기능:** 수집된 원시 텍스트에서 HTML 태그, LaTeX 수식, 특수문자 제거
+#### FR-CLEAN-02: 초록 유효성
+80자 미만 또는 숫자/기호만 → 행을 **삭제하지 않고** `quality_flag='short_abstract'` 마킹. 분석 API에서 자동 제외.
 
-**작동 원리:**
-1. `html.unescape()` → `&amp;`, `&lt;`, `&#x27;` 등 엔티티 디코딩
-2. `_LATEX_RE.sub()` → `$E=mc^2$`, `\cite{...}` 등 LaTeX 토큰 공백으로 치환
-3. `_TAG_RE.sub()` → `<sub>`, `<sup>`, `<i>` 등 HTML 태그 제거
-4. `_WHITESPACE_RE.sub()` → 연속 공백/탭/개행 단일 공백으로 정규화
-
-**적용 시점:** `upsert_papers()` / `upsert_patents()` 호출 직전 자동 적용
-
----
-
-#### FR-CLEAN-02: 초록 유효성 검사
-
-**기능:** 너무 짧거나 의미 없는 초록 필터링
-
-**기준:**
-- 80자 미만 초록 → skip
-- 숫자/기호로만 이루어진 텍스트 → skip
-
----
-
-### 2.5-b 중복 제거 (FR-DEDUP) ✅ v1.1
-
-#### FR-DEDUP-01: 배치 내 중복 제거
-
-**기능:** 같은 수집 실행에서 나온 동일 논문(다른 소스) 중 최적 레코드 유지
-
-**작동 원리:**
-1. 모든 레코드의 `normalize_title()` 계산 (소문자 + 특수문자 제거)
-2. 정규화 키로 그룹화 → 같은 그룹 내 `citation_count` 최대값 레코드만 유지
-3. 나머지 DB 삽입 시도 → `IntegrityError` → citation_count 비교 → 높으면 UPDATE
-
----
-
-#### FR-DEDUP-02: 소스 간 교차 중복 제거 (배치)
-
-**기능:** 기존 DB에서 서로 다른 소스로 저장된 동일 논문 탐지·제거
-
-**실행:**
+#### FR-CLEAN-03: 기존 데이터 일괄 정제 (CLI)
 ```bash
-python run_collectors.py --dedup           # 실제 삭제
-python run_collectors.py --dedup --dry-run # 미리보기 (삭제 없음)
+python run_migration.py --steps clean,validate         # 적용
+python run_migration.py --steps clean,validate --dry-run
+```
+멱등 — `cleaned_at IS NULL` 행만 처리.
+
+---
+
+### 2.7 중복 제거 (FR-DEDUP)
+
+#### FR-DEDUP-01: 배치 내 (수집 시)
+`normalize_title` 그룹화 → citation 최대 유지.
+
+#### FR-DEDUP-02: 소스 간 (CLI, 기존)
+```bash
+python run_collectors.py --dedup [--dry-run]
 ```
 
-**작동 원리:**
-1. 전체 papers 테이블 로드 → 정규화 제목으로 그룹화
-2. 그룹 크기 > 1인 것만 처리
-3. 우선순위: DOI 있음 > citation_count 높음 → 1개 유지, 나머지 DELETE
-4. 생존 레코드의 citation_count를 그룹 최대값으로 업데이트
+#### FR-DEDUP-03: 임베딩 기반 숨은 중복 (v1.3)
+- 같은 연도 내 cosine ≥ 0.93 (기본, 보수적) 쌍 탐지
+- 인용 낮은 쪽 → `quality_flag='duplicate'` 마킹 (삭제 X)
+- ```python run_migration.py --steps dedup [--dup-threshold 0.93] [--dry-run]```
+- 임계값 변경: 0.95(엄격) ~ 0.90(공격적)
 
 ---
 
-### 2.7 검색 UI (FR-SEARCHUI) ✅ v1.2
+### 2.8 멀티라벨 도메인 재분류 (FR-RECLASS) — v1.3 신규
 
-#### FR-SEARCHUI-01: 2컬럼 구글형 레이아웃
+#### FR-RECLASS-01: 도메인 프로토타입 생성
+`backend/config/domains.py`의 `DOMAIN_SEEDS`에서 각 도메인의 시드 텍스트(라벨 + 시드 키워드 concatenate)를 임베딩 → `domain_prototypes` 테이블에 13개 캐시.
 
-**구성:**
-- 상단: 히어로 검색창 (전체 너비, 포커스 시 글로우 효과)
-- 좌측 사이드바 (220px): 도메인·소스·정렬 필터 (라디오 버튼), 최근 검색 칩
-- 우측: 검색 결과 카드 목록
+#### FR-RECLASS-02: 문서 재분류
+모든 papers/patents의 임베딩 vs 13개 프로토타입 cosine → top-3 (score ≥ 0.45) → `paper_domains(paper_id, domain_tag, score, rank)` upsert.
+- `papers.domain_tag`는 호환성을 위해 유지(primary 도메인)
+- 모든 분석 API는 `paper_domains` JOIN 기반으로 전환
+- 임계값과 top-N은 분포 보고 튜닝
 
-#### FR-SEARCHUI-02: 검색 히스토리
+#### FR-RECLASS-03: 트리거
+```bash
+# 전체 재분류
+python run_migration.py --steps prototypes,reclassify
 
-**기능:** 최근 8개 검색어를 LocalStorage에 저장·복원
+# 신규 데이터만 (증분)
+python run_migration.py --steps reclassify --since 2026-04-01
 
-**작동 원리:**
-1. 검색 제출(Enter or 검색 버튼) 시 `localStorage['tp_search_history']`에 저장
-2. 검색창 포커스 시 드롭다운으로 최근 검색어 표시
-3. 클릭 시 검색어 즉시 적용
-4. 사이드바에도 칩(Chip) 형태로 표시
+# API
+POST /api/config/reclassify {rebuild_prototypes: false, threshold: 0.45}
+```
 
-#### FR-SEARCHUI-03: 검색어 하이라이팅
-
-**기능:** 검색어와 매칭되는 텍스트를 제목·초록에서 노란색으로 강조
-
-**작동 원리:**
-1. 검색어를 공백 기준으로 분리 (2자 이상 토큰만)
-2. 정규식으로 대소문자 무시 매칭
-3. `<mark>` 스타일 컴포넌트로 래핑하여 렌더링
+신규 데이터: 수집 직후 `embed → reclassify` 자동 chain (옵션, 설정으로 켜고 끄기).
 
 ---
 
-### 2.6 키워드 관리 (FR-KW)
+### 2.9 데이터 관리 (FR-DATA) — v1.3 신규
+
+#### FR-DATA-01: 데이터 신선도 표시
+- `GET /api/config/freshness` → `{papers_last, patents_last, per_source: {arxiv: ..., epo: ...}}`
+- 헤더에 "마지막 업데이트: 3시간 전" 뱃지
+
+#### FR-DATA-02: 단건 조회·삭제
+- `GET /api/papers/{id}`, `GET /api/patents/{id}` — 상세
+- `DELETE /api/papers/{id}`, `DELETE /api/patents/{id}` — `paper_domains` cascade
+- 프론트: `SearchResults`, `TopPapers` 행에 더보기 메뉴 (편집 / 삭제 / quality_flag 토글)
+
+#### FR-DATA-03: 일괄 삭제 (2-step confirm)
+1. `POST /api/papers/bulk-delete {filters: {domain, source, date_range}}` → preview 응답 `{count, sample, confirm_token}`
+2. `POST /api/papers/bulk-delete {confirm_token}` → 실제 삭제
+
+#### FR-DATA-04: 품질 마킹 수동 조정
+- `PATCH /api/papers/{id}/quality {flag: null | "low_quality" | "duplicate" | "short_abstract"}`
+- 분석에서 임시로 제외하거나, 잘못 마킹된 행을 복구할 때 사용
+
+#### FR-DATA-05: 잡 관리 UI
+프론트 Config 탭의 `JobsPanel`:
+- 진행 중·최근 잡 목록 (5초 polling)
+- 각 잡의 status / progress bar / log_tail / 취소 버튼
+- 잡 종류: collect, cleanup, reclassify, dedup
+
+---
+
+### 2.10 키워드 관리 (FR-KW)
 
 #### FR-KW-01: 키워드 CRUD
+- `GET /api/config/keywords`
+- `POST /api/config/keywords {keyword, domain_tag, sources, days_back}`
+- `PATCH /api/config/keywords/{id}` (활성/비활성 포함)
+- `DELETE /api/config/keywords/{id}`
 
-**기능:** 수집 키워드를 DB에서 동적 관리
+#### FR-KW-02: LLM 기반 키워드 확장
+- `POST /api/config/keywords/expand {seed: "...", domain: "..."}` → Ollama 호출 → 관련 영문 키워드 N개 제안
 
-**API:**
-- `GET /api/config/keywords` - 전체 키워드 목록
-- `POST /api/config/keywords` - 키워드 추가 `{keyword, domain_tag, sources, days_back}`
-- `PATCH /api/config/keywords/{id}` - 키워드 수정 (활성화/비활성화 포함)
-- `DELETE /api/config/keywords/{id}` - 키워드 삭제
+---
+
+### 2.11 검색 UI (FR-SEARCHUI) — v1.2 유지
+
+- 2컬럼 레이아웃 (좌: 필터, 우: 결과)
+- 라디오 버튼 도메인·소스 필터 (이제 13개 도메인)
+- LocalStorage 검색 히스토리 (최근 8개)
+- 검색어 하이라이팅 (`<mark>`)
+- 히어로 검색창 (포커스 글로우)
 
 ---
 
@@ -360,128 +256,111 @@ python run_collectors.py --dedup --dry-run # 미리보기 (삭제 없음)
 | 항목 | 목표 |
 |------|------|
 | 키워드 검색 응답 | < 200ms |
-| 의미 검색 응답 | < 3s (100개 이하) |
+| 의미 검색 응답 | < 3s (10만 건 이하) |
 | LLM 요약 첫 토큰 | < 5s |
-| 수집 속도 | 소스별 rate limit 준수 |
+| 멀티라벨 재분류 | 10만 건 < 30분 (Ollama 임베딩 캐시 활용) |
+| 마이그레이션 dry-run | 5초 이내 영향 행 수 출력 |
 
 ### 3.2 데이터 품질
 
-- 논문 중복: DOI 또는 (title+source) UNIQUE 제약으로 방지
-- 특허 중복: (patent_number+source) UNIQUE 제약으로 방지
-- Semantic Scholar: citation_count >= 5 이하 필터링
-- OpenAlex: OA 또는 cited_by_count > 10 기준 이중 필터
+- 모든 신규 데이터: `clean_text()` 자동 적용 (upsert 직전 wire-in)
+- 80자 미만 초록 → `quality_flag='short_abstract'` 마킹, 분석 자동 제외
+- 숨은 중복: cosine ≥ 0.93, 같은 연도 → `quality_flag='duplicate'`
+- 멀티라벨: 모든 문서가 top-1~3 도메인 + score(0.45 이상) 보유
+- 모든 분석 API는 `WHERE quality_flag IS NULL` 기본 적용
 
 ### 3.3 안정성
 
-- API 실패 시 최대 4회 지수 백오프 재시도 (2s, 4s, 8s, 16s)
-- Ollama 연결 실패 시 embedding = None (null), 검색 제외
-- SQLite WAL 모드로 동시 읽기 성능 확보
+- API 실패 시 최대 4회 지수 백오프 (2/4/8/16s)
+- Ollama 연결 실패 시 embedding=NULL, 의미 검색·재분류·BERT에서만 제외
+- SQLite WAL 모드
+- 마이그레이션: 변경 단계 시작 전 자동 백업 (`.bak.YYYYMMDD-HHMMSS`)
+- 모든 마이그레이션 단계 멱등 (여러 번 안전), dry-run 지원
+- 프론트: 탭별 `ErrorBoundary` — 한 컴포넌트 실패가 다른 탭으로 전파 안 됨
+
+### 3.4 운영 안전 원칙
+
+| 원칙 | 의미 |
+|------|------|
+| **삭제 0건** | 마이그레이션은 `quality_flag` 마킹만, 절대 행 삭제 안 함 |
+| **사용자 명시 삭제만** | DELETE / bulk-delete API는 사용자가 명시적으로 호출했을 때만 |
+| **2-step confirm** | bulk 작업은 preview → token → 실행 |
+| **자동 백업** | 변경 마이그레이션 시작 시 무조건 `.bak` 생성 |
+| **롤백 한 줄** | `mv techpulse.db.bak.* techpulse.db` |
 
 ---
 
-## 4. 현재 한계 및 개선 방향
+## 4. 현재 한계 및 처리 방침
 
-### 4.1 현재 한계
+| 번호 | 한계 | 심각도 | 처리 |
+|------|------|--------|------|
+| L-01 | 의미 검색 시 전체 embedding 메모리 로드 | 중 | v1.3 범위 외 (운영상 OK) |
+| L-02 | abstract만 사용, full-text 없음 | 중 | 로드맵 |
+| L-03 | 저자/assignee 정규화 약함 | 중 | 로드맵 (`Samsung Electronics Co., Ltd.` ≠ `SAMSUNG ELECTRONICS`) |
+| L-04 | 자동 스케줄링 없음 (수동 또는 API 트리거) | 중 | 서버 배포 전까지 OK, APScheduler는 추후 |
+| L-05 | USPTO/PatentsView 미구현 | 하 | 로드맵 |
+| L-06 | 테스트 0건 | 중 | 라우터별 happy-path 1개씩 추가 (로드맵) |
+| L-07 | 멀티라벨 임계값(0.45) 분포 보고 튜닝 필요 | 하 | 첫 마이그레이션 dry-run 결과로 결정 |
 
-| 번호 | 한계 | 심각도 |
-|------|------|--------|
-| L-01 | 의미 검색 시 전체 embedding 메모리 로드 (확장성 낮음) | 중 |
-| L-02 | 텍스트 전처리 부재 (HTML 태그, 특수문자 혼입 가능) | 중 |
-| L-03 | 소스 간 동일 논문 중복 가능 (DOI 없는 경우) | 중 |
-| L-04 | 키워드 자동 확장 없음 (관련 키워드 수동 추가 필요) | 하 |
-| L-05 | 검색 UI가 단순 (필터/정렬 옵션 제한) | 하 |
-| L-06 | 수집 스케줄링 없음 (수동 실행 필요) | 중 |
-| L-07 | 특허 USPTO/PatentsView 수집기 미구현 (stub) | 하 |
-
----
-
-## 5. 향후 로드맵
-
-### Phase 1 — 데이터 품질 강화
-
-#### [P1-1] 텍스트 전처리 파이프라인
-- HTML 태그 제거 (`<sub>`, `<sup>`, 수식 등)
-- 특수문자 정규화 (유니코드 정리)
-- 초록 길이 필터 (너무 짧은 것 제외 < 50자)
-- 제목 중복 유사도 기반 soft-dedup (동일 DOI 없어도 탐지)
-
-#### [P1-2] 고급 중복 제거
-- 제목 정규화 후 퍼지 매칭 (소문자, 특수문자 제거 후 비교)
-- 소스 간 동일 논문 병합 (DOI 없는 경우 대비)
-- 중복 발견 시 citation_count 최대값 유지
+서버 배포 / 멀티 유저는 v1.3 범위 외.
 
 ---
 
-### Phase 2 — 검색 UX 고도화
+## 5. v1.3 마이그레이션 절차 (사용자 가이드)
 
-#### [P2-1] 검색 사이트형 UI
-- 구글/PubMed처럼 상단 검색창 + 좌측 필터 패널
-- 날짜 범위 슬라이더 (from~to)
-- 인용수 범위 필터
-- 정렬 옵션: 관련도 / 최신순 / 인용수
-- 결과 하이라이팅 (검색어 강조)
-- 검색 히스토리 (로컬스토리지)
+### 첫 실행 (권장)
 
-#### [P2-2] 키워드 태그 인터페이스
-- 검색창에 Pill/Badge형 키워드 태그 추가/삭제
-- 태그 AND/OR 조합 검색
-- 자동완성 (기존 수집 키워드 기반)
+```bash
+# 1) 미리보기 — DB 변경 없음, 영향 행 수와 분포만 출력
+python run_migration.py --dry-run --all
 
----
+# 2) 분포 확인 후 실행 (자동 백업)
+python run_migration.py --all
+```
 
-### Phase 3 — 키워드 자동 확장 (AI 기반)
+### 단계별 의미
 
-#### [P3-1] 관련 키워드 자동 추천
-- 사용자가 "바이오" 도메인 추가 시 LLM에 관련 키워드 추천 요청
-- 예시 프롬프트: `"'바이오테크' 분야의 기술 논문 수집에 적합한 영어 검색 키워드 10개를 JSON 배열로 반환하시오"`
-- 추천된 키워드를 UI에서 선택적으로 활성화
+| 단계 | 무엇을 함 | 되돌리기 |
+|------|-----------|---------|
+| backup | `.bak` 자동 생성 | - |
+| clean | HTML/LaTeX 제거 → title/abstract 갱신 | 백업 복원 |
+| validate | 짧은 초록 → `quality_flag='short_abstract'` | `PATCH .../quality {flag: null}` |
+| embed | 누락 임베딩 생성 | - |
+| prototypes | 13개 도메인 임베딩 생성 | `--rebuild` 재생성 |
+| reclassify | `paper_domains`/`patent_domains` 채움 | 테이블 TRUNCATE 후 재실행 |
+| dedup | 중복 → `quality_flag='duplicate'` | `PATCH .../quality {flag: null}` |
 
-#### [P3-2] 도메인 확장
-- 현재 2개 도메인(Physical AI, Telecom/6G) → N개로 확장
-- 도메인 추가 시 키워드 자동 시드
-- 도메인별 색상 코딩
+### 첫 실행 후 결정사항
 
----
-
-### Phase 4 — 수집 자동화
-
-#### [P4-1] 스케줄링
-- APScheduler로 매일 자동 수집 (이미 의존성 설치됨)
-- 수집 상태 대시보드 (마지막 수집 시간, 신규 수집 수)
-- 실패 알림 (로그 + 선택적 이메일)
-
-#### [P4-2] USPTO 수집기 구현
-- PatentsView API 활용
-- 미국 특허 데이터 보완
+- **임계값 튜닝**: dry-run 출력으로 (1) 멀티라벨 분포(평균 도메인 수), (2) 중복 후보 분포 확인 → 임계값(0.45 / 0.93) 조정
+- **신규 데이터 자동 처리**: 수집 직후 `embed → reclassify` 자동 chain 활성화 여부 결정 (`backend/config/settings.py`의 `AUTO_RECLASSIFY=True`)
 
 ---
 
-### Phase 5 — 분석 고도화
+## 6. 우선순위 로드맵
 
-#### [P5-1] 기술 클러스터링
-- K-Means 또는 HDBSCAN으로 논문 클러스터링
-- 클러스터별 자동 레이블링 (LLM)
-- 클러스터 트렌드 시계열
+### Phase A (v1.3 — 진행 중)
+1. ✅ `clean_text` upsert wire-in
+2. ✅ `quality_flag` 컬럼 + 분석 API 필터
+3. ✅ 13개 도메인 + 프로토타입 + `paper_domains` 테이블
+4. ✅ 멀티라벨 재분류 CLI + API
+5. ✅ 숨은 중복 탐지
+6. ✅ 마이그레이션 CLI (dry-run / 자동 백업 / 멱등)
+7. ✅ 프론트 Config 탭 (CollectionRunner, MaintenancePanel, DataManagement, JobsPanel)
+8. ✅ 단건/일괄 삭제 API + UI
+9. ✅ 데이터 신선도 뱃지
+10. ✅ TF-IDF 분기 시계열 / BERT 군집 / 트렌드 이상치 뱃지
+11. ✅ 프론트 ErrorBoundary
 
-#### [P5-2] 기관·연구자 분석
-- 저자 네트워크 그래프
-- 기관별 논문/특허 생산량 비교
-- 신흥 연구 그룹 탐지
+### Phase B (다음)
+- 논문↔특허 cross-link 사전계산 (`cross_links` 테이블)
+- 저자/assignee 정규화 + co-authorship 그래프
+- 키워드 자동 확장 UI 강화
+- 라우터별 happy-path pytest
 
-#### [P5-3] 경쟁사 트래킹
-- 특정 기업(예: 삼성, 구글, 화웨이) 특허 모니터링
-- 기업별 기술 포트폴리오 시각화
-
----
-
-## 6. 즉시 실행 계획 (우선순위 순)
-
-| 순위 | 작업 | 상태 | 예상 효과 | 난이도 |
-|------|------|------|----------|--------|
-| 1 | **텍스트 전처리** (HTML 정제, 길이 필터) | ✅ 완료 | 데이터 품질 향상 | 쉬움 |
-| 2 | **소프트 중복 제거** (퍼지 제목 매칭) | ✅ 완료 | DB 정확도 향상 | 중간 |
-| 3 | **검색 UI 개선** (구글형 레이아웃, 필터 패널) | ✅ 완료 | UX 대폭 향상 | 중간 |
-| 4 | **키워드 자동 확장** (LLM 기반 관련어 추천) | 예정 | 수집 범위 확대 | 중간 |
-| 5 | **APScheduler 자동 수집** | 예정 | 운영 자동화 | 중간 |
-| 6 | **USPTO/PatentsView 수집기** | 예정 | 미국 특허 커버리지 | 어려움 |
-| 7 | **클러스터링 + 자동 레이블링** | 예정 | 인사이트 깊이 향상 | 어려움 |
+### Phase C (장기)
+- APScheduler 자동 수집 (운영화 시점)
+- USPTO/PatentsView 수집기
+- PostgreSQL + pgvector 마이그레이션 (10만 건 이상 / 멀티 유저)
+- 워치리스트 + 주간 다이제스트
+- 하이브리드 검색 (BM25 + dense)
