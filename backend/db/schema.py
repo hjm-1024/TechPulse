@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS papers (
     citation_count  INTEGER DEFAULT 0,
     journal         TEXT,
     domain_tag      TEXT,
+    quality_flag    TEXT,
+    cleaned_at      TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(doi),
     UNIQUE(title, source)
@@ -46,7 +48,9 @@ def get_connection(db_path: str):
 
 
 def migrate_add_embeddings(db_path: str) -> None:
-    """Safe migration: add embedding BLOB column to papers and patents if missing."""
+    """Safe migration: add embedding BLOB column to papers and patents if missing.
+    Also adds quality_flag and cleaned_at columns used by the v1.3 migration pipeline.
+    """
     with get_connection(db_path) as conn:
         for table in ("papers", "patents"):
             try:
@@ -54,6 +58,12 @@ def migrate_add_embeddings(db_path: str) -> None:
                 logger.info("Migration: added embedding column to %s", table)
             except Exception:
                 pass  # column already exists
+            for col, ddl in (("quality_flag", "TEXT"), ("cleaned_at", "TEXT")):
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+                    logger.info("Migration: added %s column to %s", col, table)
+                except Exception:
+                    pass
 
 
 def init_db(db_path: str) -> None:
@@ -71,25 +81,42 @@ def _normalize_title(title: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
 
 
+_INSERT_PAPER_SQL = """
+    INSERT INTO papers
+        (title, abstract, authors, published_date, source,
+         doi, citation_count, journal, domain_tag,
+         quality_flag, cleaned_at)
+    VALUES
+        (:title, :abstract, :authors, :published_date, :source,
+         :doi, :citation_count, :journal, :domain_tag,
+         :quality_flag, datetime('now'))
+"""
+
+
 def upsert_papers(db_path: str, papers: list[dict]) -> tuple[int, int, int]:
     """Insert or update papers. Returns (inserted, updated, skipped).
     On duplicate: if new citation_count is higher, UPDATE; otherwise skip.
+
+    Applies text cleaning (clean_title/clean_abstract) and flags short abstracts
+    with quality_flag='short_abstract' so they are excluded from analysis.
     """
+    from backend.utils.text_cleaner import clean_title, clean_abstract, is_valid_abstract
+
     inserted = updated = skipped = 0
     with get_connection(db_path) as conn:
-        for p in papers:
+        for raw in papers:
+            p = dict(raw)
+            p["title"]    = clean_title(p.get("title", ""))
+            p["abstract"] = clean_abstract(p.get("abstract", ""))
+            if not p["title"]:
+                skipped += 1
+                continue
+            if not is_valid_abstract(p["abstract"]):
+                p["quality_flag"] = "short_abstract"
+            else:
+                p.setdefault("quality_flag", None)
             try:
-                conn.execute(
-                    """
-                    INSERT INTO papers
-                        (title, abstract, authors, published_date, source,
-                         doi, citation_count, journal, domain_tag)
-                    VALUES
-                        (:title, :abstract, :authors, :published_date, :source,
-                         :doi, :citation_count, :journal, :domain_tag)
-                    """,
-                    p,
-                )
+                conn.execute(_INSERT_PAPER_SQL, p)
                 inserted += 1
             except sqlite3.IntegrityError:
                 existing = conn.execute(

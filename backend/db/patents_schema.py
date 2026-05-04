@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS patents (
     source           TEXT,
     country          TEXT DEFAULT 'US',
     domain_tag       TEXT,
+    quality_flag     TEXT,
+    cleaned_at       TEXT,
     created_at       TEXT DEFAULT (datetime('now')),
     UNIQUE(patent_number, source)
 )
@@ -48,25 +50,43 @@ def update_patent_parties(db_path: str, patent_number: str, source: str,
         return cur.rowcount > 0
 
 
+_INSERT_PATENT_SQL = """
+    INSERT INTO patents
+        (patent_number, title, abstract, inventors, assignee,
+         filing_date, publication_date, ipc_codes,
+         source, country, domain_tag,
+         quality_flag, cleaned_at)
+    VALUES
+        (:patent_number, :title, :abstract, :inventors, :assignee,
+         :filing_date, :publication_date, :ipc_codes,
+         :source, :country, :domain_tag,
+         :quality_flag, datetime('now'))
+"""
+
+
 def upsert_patents(db_path: str, patents: list[dict]) -> tuple[int, int]:
-    """Insert patents, skip duplicates. Returns (inserted, skipped)."""
+    """Clean and insert patents, skip duplicates. Returns (inserted, skipped).
+
+    Applies text cleaning (clean_title/clean_abstract) and flags short abstracts
+    with quality_flag='short_abstract' so they are excluded from analysis.
+    """
+    from backend.utils.text_cleaner import clean_title, clean_abstract, is_valid_abstract
+
     inserted = skipped = 0
     with get_connection(db_path) as conn:
-        for p in patents:
+        for raw in patents:
+            p = dict(raw)
+            p["title"]    = clean_title(p.get("title", ""))
+            p["abstract"] = clean_abstract(p.get("abstract", ""))
+            if not p["title"]:
+                skipped += 1
+                continue
+            if not is_valid_abstract(p["abstract"]):
+                p["quality_flag"] = "short_abstract"
+            else:
+                p.setdefault("quality_flag", None)
             try:
-                conn.execute(
-                    """
-                    INSERT INTO patents
-                        (patent_number, title, abstract, inventors, assignee,
-                         filing_date, publication_date, ipc_codes,
-                         source, country, domain_tag)
-                    VALUES
-                        (:patent_number, :title, :abstract, :inventors, :assignee,
-                         :filing_date, :publication_date, :ipc_codes,
-                         :source, :country, :domain_tag)
-                    """,
-                    p,
-                )
+                conn.execute(_INSERT_PATENT_SQL, p)
                 inserted += 1
             except sqlite3.IntegrityError:
                 skipped += 1
