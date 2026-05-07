@@ -152,6 +152,7 @@ def _fetch_all_pages(
     session: requests.Session,
     max_results: int,
     seen: set[str],
+    domain_tag_map: dict | None = None,
 ) -> Generator[dict, None, None]:
     """Paginate a single filter query, skipping already-seen titles."""
     # Extracted here so both filter passes share dedup state via `seen`.
@@ -221,7 +222,10 @@ def fetch_papers(
             pass_label = "is_oa" if "is_oa" in filter_str else "cited>10"
             logger.debug("OpenAlex | keyword=%r | pass=%s", keyword, pass_label)
 
-            for paper in _fetch_all_pages(filter_str, session, max_per_keyword - fetched, seen):
+            for paper in _fetch_all_pages(
+                filter_str, session, max_per_keyword - fetched, seen,
+                domain_tag_map=domain_tag_map,
+            ):
                 yield paper
                 fetched += 1
                 if fetched >= max_per_keyword:
