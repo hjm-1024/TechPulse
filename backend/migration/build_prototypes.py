@@ -19,10 +19,14 @@ def build_prototypes(db_path: str, dry_run: bool = False,
     summary = {"built": 0, "skipped": 0, "failed": 0, "tags": []}
 
     with get_connection(db_path) as conn:
-        existing = {
-            r["domain_tag"]
-            for r in conn.execute("SELECT domain_tag FROM domain_prototypes")
-        }
+        try:
+            existing = {
+                r["domain_tag"]
+                for r in conn.execute("SELECT domain_tag FROM domain_prototypes")
+            }
+        except Exception:
+            # Table may not exist yet (e.g. dry-run before schema step has run)
+            existing = set()
 
     todo = []
     for tag, entry in DOMAIN_SEEDS.items():
@@ -75,11 +79,15 @@ def build_prototypes(db_path: str, dry_run: bool = False,
 
 
 def load_prototypes(db_path: str) -> dict[str, np.ndarray]:
-    """Load all prototype vectors keyed by domain_tag."""
+    """Load all prototype vectors keyed by domain_tag.
+    Returns {} if the table doesn't exist yet (e.g. dry-run before schema step)."""
     with get_connection(db_path) as conn:
-        rows = conn.execute(
-            "SELECT domain_tag, embedding FROM domain_prototypes"
-        ).fetchall()
+        try:
+            rows = conn.execute(
+                "SELECT domain_tag, embedding FROM domain_prototypes"
+            ).fetchall()
+        except Exception:
+            return {}
     return {
         r["domain_tag"]: np.frombuffer(r["embedding"], dtype=np.float32)
         for r in rows
