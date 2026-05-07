@@ -1,0 +1,45 @@
+"""
+FastAPI application entry point.
+Run with: uvicorn backend.main:app --reload
+"""
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.config import DB_PATH
+from backend.db.schema import init_db, migrate_add_embeddings
+from backend.db.patents_schema import init_patents_db
+from backend.db.config_schema import init_collection_config
+from backend.routers import papers, stats, patents
+from backend.routers import semantic, ai, config, insights
+
+app = FastAPI(title="TechPulse API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def startup():
+    init_db(DB_PATH)
+    init_patents_db(DB_PATH)
+    migrate_add_embeddings(DB_PATH)
+    init_collection_config(DB_PATH)
+
+
+app.include_router(stats.router,    prefix="/api")
+app.include_router(papers.router,   prefix="/api")
+app.include_router(patents.router,  prefix="/api")
+app.include_router(semantic.router)
+app.include_router(ai.router)
+app.include_router(config.router)
+app.include_router(insights.router)
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
